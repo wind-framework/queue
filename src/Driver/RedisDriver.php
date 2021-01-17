@@ -2,12 +2,13 @@
 
 namespace Wind\Queue\Driver;
 
-use function Amp\call;
-use Wind\Queue\Queue;
-use Wind\Redis\Redis;
-
+use Wind\Queue\Job;
 use Wind\Queue\Message;
+use Wind\Queue\Queue;
+use Wind\Queue\QueueFactory;
+use Wind\Redis\Redis;
 use Wind\Utils\StrUtil;
+use function Amp\call;
 
 class RedisDriver extends Driver
 {
@@ -22,9 +23,8 @@ class RedisDriver extends Driver
     private $keyReserved;
     private $keyDelay;
     private $keyFail;
-
-    private $uniq;
-    private $autoId = 0;
+    private $keyData;
+    private $keyId;
 
     public function __construct($config)
     {
@@ -39,6 +39,8 @@ class RedisDriver extends Driver
         $this->keyReserved = $config['key'].':reserved';
         $this->keyDelay = $config['key'].':delay';
         $this->keyFail = $config['key'].':fail';
+        $this->keyData = $config['key'].':data';
+        $this->keyId = $config['key'].':id';
 
         //轮询需要有间隔主要作用于延迟队列的转移，在有多个并发时每个并发都有可能进行转移处理，理想情况下每秒都有协程处理到轮询。
         //所以并发多时，适当的增加轮询可间隔可以减少性能浪费
@@ -60,18 +62,25 @@ class RedisDriver extends Driver
 
     public function push(Message $message, $delay)
     {
-        if ($message->id === null) {
-            $message->id = $this->uniq.'-'.(++$this->autoId);
-        }
+        return call(function() use ($message, $delay) {
+            $message->id = yield $this->redis->incr($this->keyId);
 
-        $raw = self::serialize($message);
+            //put data
+            $data = \serialize($message->job);
+            yield $this->redis->hSet($this->keyData, $message->id, $data);
 
-        if ($delay == 0) {
-            $queue = $this->getPriorityKey($message->priority);
-            return $this->redis->rPush($queue, $raw);
-        } else {
-            return $this->redis->zAdd($this->keyDelay, time()+$delay, $raw);
-        }
+            //put index
+            $index = self::serializeIndex($message);
+
+            if ($delay == 0) {
+                $queue = $this->getPriorityKey($message->priority);
+                yield $this->redis->rPush($queue, $index);
+            } else {
+                yield $this->redis->zAdd($this->keyDelay, time()+$delay, $index);
+            }
+
+            return $message->id;
+        });
     }
 
     public function pop()
@@ -80,27 +89,44 @@ class RedisDriver extends Driver
             yield $this->ready($this->keyDelay);
             yield $this->ready($this->keyReserved);
 
-            list(, $raw) = yield $this->redis->blPop($this->keysReady, $this->btimeout);
-            if ($raw === null) {
+            list(, $index) = yield $this->redis->blPop($this->keysReady, $this->btimeout);
+            if ($index === null) {
                 return null;
             }
 
-            $message = self::unserialize($raw);
-            yield $this->redis->zAdd($this->keyReserved, time()+$message->job->ttr, $raw);
+            //get data
+            $id = self::unserializeIndex($index)['id'];
+            $data = yield $this->redis->hGet($this->keyData, $id);
 
-            return $message;
+            //message is already deleted
+            if (!$data) {
+                return null;
+            }
+
+            /* @var Job $job */
+            $job = \unserialize($data);
+            yield $this->redis->zAdd($this->keyReserved, time()+$job->ttr, $index);
+
+            return new Message($job, $id, $index);
         });
     }
 
     public function ack(Message $message)
     {
-        return $this->remove($message->raw);
+        return call(function() use ($message) {
+            if (yield $this->removeIndex($message)) {
+                return yield $this->redis->hDel($this->keyData, $message->id);
+            } else {
+                return false;
+            }
+        });
+
     }
 
     public function fail(Message $message)
     {
         return call(function() use ($message) {
-            if (yield $this->remove($message->raw)) {
+            if (yield $this->removeIndex($message)) {
                 return yield $this->redis->rPush($this->keyFail, $message->raw);
             } else {
                 return false;
@@ -111,19 +137,24 @@ class RedisDriver extends Driver
     public function release(Message $message, $delay)
     {
         return call(function() use ($message, $delay) {
-            if (yield $this->remove($message->raw)) {
+            if (yield $this->removeIndex($message)) {
                 $message->attempts++;
-                $raw = self::serialize($message);
-                return $this->redis->zAdd($this->keyDelay, time() + $delay, $raw);
+                $index = self::serializeIndex($message);
+                return $this->redis->zAdd($this->keyDelay, time() + $delay, $index);
             }
             return false;
         });
     }
 
-    private function remove($raw)
+    public function delete($id)
     {
-        return call(function() use ($raw) {
-            return (yield $this->redis->zRem($this->keyReserved, $raw)) > 0;
+        return $this->redis->hDel($this->keyData, $id);
+    }
+
+    private function removeIndex(Message $message)
+    {
+        return call(function() use ($message) {
+            return (yield $this->redis->zRem($this->keyReserved, $message->raw)) > 0;
         });
     }
 
@@ -133,11 +164,11 @@ class RedisDriver extends Driver
             $now = time();
             $options = ['LIMIT', 0, 128];
             if ($expires = yield $this->redis->zrevrangebyscore($queue, $now, '-inf', $options)) {
-                foreach ($expires as $raw) {
-                    if ((yield $this->redis->zRem($queue, $raw)) > 0) {
-                        $message = self::unserialize($raw);
-                        $key = $this->getPriorityKey($message->priority);
-                        yield $this->redis->rPush($key, $raw);
+                foreach ($expires as $index) {
+                    if ((yield $this->redis->zRem($queue, $index)) > 0) {
+                        $priority = self::unserializeIndex($index)['priority'];
+                        $key = $this->getPriorityKey($priority);
+                        yield $this->redis->rPush($key, $index);
                     }
                 }
             }
@@ -146,21 +177,18 @@ class RedisDriver extends Driver
 
     private function getPriorityKey($pri)
     {
-        return $this->keysReady[$pri] ?? $this->keysReady[Queue::PRI_NORMAL];
+        return $this->keysReady[$pri] ?? $this->keysReady[QueueFactory::PRI_NORMAL];
     }
 
-    private static function serialize(Message $message)
+    private static function serializeIndex(Message $message)
     {
-        return \serialize([$message->id, $message->job, $message->attempts, $message->priority]);
+        return $message->id.','.$message->priority.','.$message->attempts;
     }
 
-    private static function unserialize($raw)
+    private static function unserializeIndex($index)
     {
-        list($id, $job, $attempts, $pri) = \unserialize($raw);
-        $message = new Message($job, $id, $raw);
-        $message->attempts = $attempts;
-        $message->priority = $pri;
-        return $message;
+        list($r['id'], $r['priority'], $r['attempts']) = explode(',', $index);
+        return $r;
     }
 
 }

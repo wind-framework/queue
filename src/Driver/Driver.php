@@ -2,7 +2,7 @@
 
 namespace Wind\Queue\Driver;
 
-use Wind\Queue\Queue;
+use Wind\Queue\QueueFactory;
 use Wind\Queue\Message;
 
 abstract class Driver
@@ -15,7 +15,7 @@ abstract class Driver
      *
      * @param Message $message
      * @param int $delay 消息延迟秒数，0代表不延迟
-     * @return void
+     * @return string|int
      */
     public abstract function push(Message $message, int $delay);
 
@@ -36,5 +36,13 @@ abstract class Driver
     public function attempts(Message $message) {
         return $message->attempts;
     }
+
+    /**
+     * 删除消息
+     *
+     * @param string $id
+     * @return bool
+     */
+    public abstract function delete($id);
 
 }

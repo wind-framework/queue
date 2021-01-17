@@ -2,9 +2,9 @@
 
 namespace Wind\Queue;
 
+use Amp\Promise;
+use Wind\Queue\Driver\Driver;
 use function Amp\call;
-
-use Wind\Base\Config;
 
 class Queue
 {
@@ -15,40 +15,47 @@ class Queue
     const PRI_LOW = 2;
 
     /**
-     * Driver instances
-     * @var \Wind\Queue\Driver\Driver[]
+     * @var Driver
      */
-    private static $queueDrivers = [];
+    private $driver;
 
-    public static function put($queue, Job $job, $delay=0, $priority=self::PRI_NORMAL)
+    /**
+     * @var Promise|null
+     */
+    private $connecting;
+
+    public function __construct(Driver $driver)
     {
-        return call(function() use ($queue, $job, $delay, $priority) {
-            $driver = yield self::getDriver($queue);
-            $message = new Message($job);
-            $message->priority = $priority;
-            return yield $driver->push($message, $delay);
+        $this->driver = $driver;
+        $this->connecting = $driver->connect();
+    }
+
+    public function put(Job $job, $delay=0, $priority=self::PRI_NORMAL)
+    {
+        $message = new Message($job);
+        $message->priority = $priority;
+        return $this->call(function() use ($message, $delay) {
+            return $this->driver->push($message, $delay);
         });
     }
 
-    private static function getDriver($queue)
+    public function delete($id)
     {
-        return call(function() use ($queue) {
-            if (isset(self::$queueDrivers[$queue])) {
-                return self::$queueDrivers[$queue];
-            }
-
-            $config = di()->get(Config::class)->get("queue.$queue");
-
-            if (!$config) {
-                throw new \Exception("Not found config for queue'$queue'.");
-            }
-    
-            /** @var DriverInterface $driver */
-            $driver = self::$queueDrivers[$queue] = new $config['driver']($config);
-            yield $driver->connect();
-
-            return self::$queueDrivers[$queue] = $driver;
+        return $this->call(function() use ($id) {
+            return $this->driver->delete($id);
         });
+    }
+
+    private function call($callback) {
+        if ($this->connecting !== null) {
+            return call(function() use ($callback) {
+                yield $this->connecting;
+                $this->connecting = null;
+                return $callback();
+            });
+        } else {
+            return $callback();
+        }
     }
 
 }

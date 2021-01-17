@@ -2,10 +2,10 @@
 
 namespace Wind\Queue\Driver;
 
-use function Amp\call;
-use Wind\Queue\Queue;
-use Wind\Queue\Message;
 use Wind\Beanstalk\BeanstalkClient;
+use Wind\Queue\Message;
+use Wind\Queue\Queue;
+use function Amp\call;
 
 class BeanstalkDriver extends Driver
 {
@@ -86,6 +86,11 @@ class BeanstalkDriver extends Driver
             $state = yield $this->client->statsJob($message->id);
             return $state['releases'];
         });
+    }
+
+    public function delete($id)
+    {
+        return $this->client->delete($id);
     }
 
 }
