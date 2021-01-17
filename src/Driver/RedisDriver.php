@@ -177,7 +177,7 @@ class RedisDriver extends Driver
 
     private function getPriorityKey($pri)
     {
-        return $this->keysReady[$pri] ?? $this->keysReady[QueueFactory::PRI_NORMAL];
+        return $this->keysReady[$pri] ?? $this->keysReady[Queue::PRI_NORMAL];
     }
 
     private static function serializeIndex(Message $message)
