@@ -1,6 +1,6 @@
 {
     "name": "wind-framework/queue",
-    "description": "Wind framework base core.",
+    "description": "Wind framework message queue component.",
     "type": "library",
     "version": "0.1.0",
     "require": {
