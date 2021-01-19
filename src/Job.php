@@ -21,4 +21,14 @@ abstract class Job
 
     abstract public function handle();
 
+	/**
+	 * Handle before job into fail queue
+	 *
+	 * @return bool True into handle queue, or false delete queue
+	 */
+    public function fail()
+    {
+    	return true;
+    }
+
 }

@@ -77,7 +77,11 @@ class ConsumerProcess extends Process
                             yield $driver->release($message, $attempts+1);
                         } else {
                             $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_FAILED, $jobClass, $message->id, $e));
-                            yield $driver->fail($message);
+                            if (yield call([$job, 'fail'])) {
+	                            yield $driver->fail($message);
+                            } else {
+                            	yield $driver->delete($message->id);
+                            }
                         }
                     }
                 }
