@@ -67,17 +67,14 @@ class ConsumerProcess extends Process
                         $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_SUCCEED, $jobClass, $message->id));
                     } catch (\Exception $e) {
                         $attempts = $driver->attempts($message);
-
-                        if ($attempts instanceof Promise) {
-                            $attempts = yield $attempts;
-                        }
+                        ($attempts instanceof Promise) && $attempts = yield $attempts;
 
                         if ($attempts < $message->job->maxAttempts) {
                             $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_ERROR, $jobClass, $message->id, $e));
                             yield $driver->release($message, $attempts+1);
                         } else {
                             $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_FAILED, $jobClass, $message->id, $e));
-                            if (yield call([$job, 'fail'])) {
+                            if (yield call([$job, 'fail'], $message, $e)) {
 	                            yield $driver->fail($message);
                             } else {
                             	yield $driver->delete($message->id);

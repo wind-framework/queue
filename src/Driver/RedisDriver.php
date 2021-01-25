@@ -5,7 +5,6 @@ namespace Wind\Queue\Driver;
 use Wind\Queue\Job;
 use Wind\Queue\Message;
 use Wind\Queue\Queue;
-use Wind\Queue\QueueFactory;
 use Wind\Redis\Redis;
 use Wind\Utils\StrUtil;
 use function Amp\call;
@@ -95,7 +94,7 @@ class RedisDriver extends Driver
             }
 
             //get data
-            $id = self::unserializeIndex($index)['id'];
+            list($id, $priority, $attempts) = self::unserializeIndex($index);
             $data = yield $this->redis->hGet($this->keyData, $id);
 
             //message is already deleted
@@ -107,7 +106,11 @@ class RedisDriver extends Driver
             $job = \unserialize($data);
             yield $this->redis->zAdd($this->keyReserved, time()+$job->ttr, $index);
 
-            return new Message($job, $id, $index);
+            $message = new Message($job, $id, $index);
+            $message->priority = $priority;
+            $message->attempts = $attempts;
+
+            return $message;
         });
     }
 
@@ -166,7 +169,7 @@ class RedisDriver extends Driver
             if ($expires = yield $this->redis->zrevrangebyscore($queue, $now, '-inf', $options)) {
                 foreach ($expires as $index) {
                     if ((yield $this->redis->zRem($queue, $index)) > 0) {
-                        $priority = self::unserializeIndex($index)['priority'];
+                        list(, $priority) = self::unserializeIndex($index);
                         $key = $this->getPriorityKey($priority);
                         yield $this->redis->rPush($key, $index);
                     }
@@ -185,10 +188,13 @@ class RedisDriver extends Driver
         return $message->id.','.$message->priority.','.$message->attempts;
     }
 
+    /**
+     * @param string $index
+     * @return array [id, priority, attempts]
+     */
     private static function unserializeIndex($index)
     {
-        list($r['id'], $r['priority'], $r['attempts']) = explode(',', $index);
-        return $r;
+        return explode(',', $index);
     }
 
 }
