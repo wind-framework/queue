@@ -2,7 +2,7 @@
     "name": "wind-framework/queue",
     "description": "Wind framework message queue component.",
     "type": "library",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "require": {
         "wind-framework/wind-framework": "~0.1.0",
         "wind-framework/redis": "~0.1.0",
