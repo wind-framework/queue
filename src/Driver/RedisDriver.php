@@ -25,9 +25,12 @@ class RedisDriver extends Driver
     private $keyData;
     private $keyId;
 
+    /**
+     * @param array $config
+     */
     public function __construct($config)
     {
-        $this->redis = di()->make(Redis::class);
+        $this->redis = empty($config['use_single_instance']) ? di()->make(Redis::class) : di()->get(Redis::class);
 
         $rk = $config['key'].':ready';
         $this->keysReady = [

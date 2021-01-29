@@ -25,6 +25,8 @@ class QueueFactory
             throw new \InvalidArgumentException("Not found config for queue'$queue'.");
         }
 
+        $config['use_single_instance'] = true;
+
         /** @var \Wind\Queue\Driver\Driver $driver */
         $driver = new $config['driver']($config);
         return $this->queues[$queue] = new Queue($driver);

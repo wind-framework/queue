@@ -64,6 +64,12 @@ class Queue
         });
     }
 
+    /**
+     * Wait for connected and do the call
+     *
+     * @param callable $callback
+     * @return Promise
+     */
     private function call($callback) {
         if ($this->connecting !== null) {
             return call(function() use ($callback) {
