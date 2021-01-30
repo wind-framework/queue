@@ -2,13 +2,13 @@
 
 namespace Wind\Queue\Driver;
 
-use Wind\Queue\QueueFactory;
+use Amp\Promise;
 use Wind\Queue\Message;
 
-abstract class Driver
+interface Driver
 {
 
-    public abstract function connect();
+    public function connect();
 
     /**
      * 放入消息
@@ -17,25 +17,23 @@ abstract class Driver
      * @param int $delay 消息延迟秒数，0代表不延迟
      * @return string|int
      */
-    public abstract function push(Message $message, int $delay);
+    public function push(Message $message, int $delay);
 
-    public abstract function pop();
+    public function pop();
 
-    public abstract function ack(Message $message);
+    public function ack(Message $message);
 
-    public abstract function fail(Message $message);
+    public function fail(Message $message);
 
-    public abstract function release(Message $message, $delay);
+    public function release(Message $message, $delay);
 
     /**
      * 获取消息的已尝试次数
      *
      * @param Message $message
-     * @return boolean
+     * @return int|Promise<int>
      */
-    public function attempts(Message $message) {
-        return $message->attempts;
-    }
+    public function attempts(Message $message);
 
     /**
      * 删除消息
@@ -43,6 +41,17 @@ abstract class Driver
      * @param string $id
      * @return bool
      */
-    public abstract function delete($id);
+    public function delete($id);
+
+    /**
+     * 驱动是否支持连接复用
+     *
+     * 如果驱动支持连接重用，则系统会使用 ChanDriver 嵌套该驱动，从而实现仅用两个连接在一个进程内支持无数的消费者协程。
+     * 并不所有驱动都支持连接复用，比如 Beanstalkd 通过 reserve 获得的消息只有该连接可以 delete 消息。
+     * 所以要确认支持时才返回 true，否则默认请返回 false
+     *
+     * @return bool
+     */
+    public static function isSupportReuseConnection();
 
 }

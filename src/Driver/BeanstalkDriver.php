@@ -3,18 +3,32 @@
 namespace Wind\Queue\Driver;
 
 use Wind\Beanstalk\BeanstalkClient;
+use Wind\Beanstalk\BeanstalkException;
 use Wind\Queue\Message;
 use Wind\Queue\Queue;
 use function Amp\call;
 
-class BeanstalkDriver extends Driver
+class BeanstalkDriver implements Driver
 {
 
     /**
      * @var BeanstalkClient
      */
     private $client;
+
+    /**
+     * Tube to use
+     *
+     * @var string
+     */
     private $tube;
+
+    /**
+     * Reserve timeout seconds, or null to no timeout
+     *
+     * @var int|null
+     */
+    private $reserveTimeout = null;
 
     public function __construct($config)
     {
@@ -22,8 +36,13 @@ class BeanstalkDriver extends Driver
             'autoReconnect' => true,
             'concurrent' => true
         ]);
-        // $this->client->debug = true;
+
+        //$this->client->debug = true;
         $this->tube = $config['tube'];
+
+        if (isset($config['reserve_timeout']) && $config['reserve_timeout'] > 0) {
+            $this->reserveTimeout = $config['reserve_timeout'];
+        }
     }
 
     public function connect()
@@ -56,9 +75,17 @@ class BeanstalkDriver extends Driver
     public function pop()
     {
         return call(function() {
-            $data = yield $this->client->reserve();
-            $job = unserialize($data['body']);
-            return new Message($job, $data['id']);
+            try {
+                $data = yield $this->client->reserve($this->reserveTimeout);
+                $job = unserialize($data['body']);
+                return new Message($job, $data['id']);
+            } catch (BeanstalkException $e) {
+                switch ($e->getMessage()) {
+                    case 'DEADLINE_SOON':
+                    case 'TIMED_OUT': return null;
+                    default: throw $e;
+                }
+            }
         });
     }
 
@@ -91,6 +118,11 @@ class BeanstalkDriver extends Driver
     public function delete($id)
     {
         return $this->client->delete($id);
+    }
+
+    public static function isSupportReuseConnection()
+    {
+        return false;
     }
 
 }

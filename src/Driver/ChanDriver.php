@@ -14,7 +14,7 @@ use function Amp\Promise\all;
  *
  * @package Wind\Queue\Driver
  */
-class ChanDriver extends Driver
+class ChanDriver implements Driver
 {
 
     /**
@@ -89,6 +89,16 @@ class ChanDriver extends Driver
     public function delete($id)
     {
         return $this->operator->delete($id);
+    }
+
+    public function attempts(Message $message)
+    {
+        return $this->operator->attempts($message);
+    }
+
+    public static function isSupportReuseConnection()
+    {
+        throw new \Exception('Do not user ChanDriver directly.');
     }
 
 }

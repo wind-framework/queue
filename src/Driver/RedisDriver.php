@@ -9,7 +9,7 @@ use Wind\Redis\Redis;
 use Wind\Utils\StrUtil;
 use function Amp\call;
 
-class RedisDriver extends Driver
+class RedisDriver implements Driver
 {
 
     /**
@@ -157,6 +157,10 @@ class RedisDriver extends Driver
         return $this->redis->hDel($this->keyData, $id);
     }
 
+    public function attempts(Message $message) {
+        return $message->attempts;
+    }
+
     private function removeIndex(Message $message)
     {
         return call(function() use ($message) {
@@ -198,6 +202,11 @@ class RedisDriver extends Driver
     private static function unserializeIndex($index)
     {
         return explode(',', $index);
+    }
+
+    public static function isSupportReuseConnection()
+    {
+        return true;
     }
 
 }

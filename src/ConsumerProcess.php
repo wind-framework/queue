@@ -50,23 +50,26 @@ class ConsumerProcess extends Process
         $concurrent = $this->config['concurrent'] ?? 1;
 
         //Use ChanDriver to optimize to connections.
-        if (!empty($this->config['connection_optimize']) && $concurrent > 1) {
+        if ($concurrent > 2 && $this->config['driver']::isSupportReuseConnection()) {
             $driver = new ChanDriver($this->config);
+            yield $driver->connect();
             for ($i=0; $i<$concurrent; $i++) {
-                asyncCall([$this, 'createConsumer'], $driver, $i);
+                asyncCall([$this, 'createConsumer'], $driver, false);
             }
             $driver->loop();
         } else {
             for ($i=0; $i<$concurrent; $i++) {
                 $driver = new $this->config['driver']($this->config);
-                asyncCall([$this, 'createConsumer'], $driver);
+                asyncCall([$this, 'createConsumer'], $driver, true);
             }
         }
     }
 
-    public function createConsumer(Driver $driver, $i=null)
+    public function createConsumer(Driver $driver, $connectInConsumer)
     {
-        yield $driver->connect();
+        if ($connectInConsumer) {
+            yield $driver->connect();
+        }
 
         while (true) {
             $message = yield $driver->pop();
