@@ -33,4 +33,21 @@ abstract class Job
     	return true;
     }
 
+    /**
+     * Only serialize properties without private
+     * @return array
+     */
+    public function __sleep()
+    {
+        $ref = new \ReflectionClass(static::class);
+        $props = $ref->getProperties(\ReflectionProperty::IS_PUBLIC | \ReflectionProperty::IS_PROTECTED);
+        $names = [];
+
+        foreach ($props as $p) {
+            $names[] = $p->getName();
+        }
+
+        return $names;
+    }
+
 }
