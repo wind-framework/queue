@@ -53,8 +53,6 @@ class RedisDriver implements Driver
         if ($concurrent < $this->btimeout) {
             $this->btimeout = $concurrent;
         }
-
-        $this->uniq = StrUtil::randomString(8);
     }
     
     public function connect()
@@ -120,8 +118,9 @@ class RedisDriver implements Driver
     public function ack(Message $message)
     {
         return call(function() use ($message) {
-            if (yield $this->removeIndex($message)) {
-                return yield $this->redis->hDel($this->keyData, $message->id);
+            if (yield $this->redis->hDel($this->keyData, $message->id)) {
+                yield $this->removeIndex($message);
+                return true;
             } else {
                 return false;
             }
