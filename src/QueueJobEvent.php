@@ -30,7 +30,7 @@ class QueueJobEvent extends \Wind\Event\Event
             case self::STATE_SUCCEED: return "Consume Job {$this->job}[{$this->id}] success.";
             case self::STATE_ERROR:
             case self::STATE_FAILED:
-                return "Consume Job {$this->job}[{$this->id}] ".($this->state == self::STATE_ERROR ? 'error' : 'failed').': '.fmtException($this->error, config('max_stack_trace', 5));
+                return "Consume Job {$this->job}[{$this->id}] ".($this->state == self::STATE_ERROR ? 'error' : 'failed').': '.fmtException($this->error, config('max_stack_trace'));
             default:
                 return '';
         }
