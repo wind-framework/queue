@@ -9,12 +9,20 @@ use Wind\Process\Process;
 use Wind\Queue\Driver\ChanDriver;
 use Wind\Queue\Driver\Driver;
 use Psr\EventDispatcher\EventDispatcherInterface;
+use Wind\Base\Channel;
+
 use function Amp\asyncCall;
 use function Amp\call;
+use function Amp\delay;
 
 class ConsumerProcess extends Process
 {
 
+    /**
+     * Queue name
+     *
+     * @var string
+     */
     protected $queue = 'default';
 
     /**
@@ -28,6 +36,15 @@ class ConsumerProcess extends Process
      * @var EventDispatcherInterface
      */
     private $eventDispatcher;
+
+    /**
+     * 当前工作协程状态
+     *
+     * 键代表协程的编号，值为当前正在处理的任务，值为 null 时代表协程空闲状态
+     *
+     * @var array
+     */
+    private $concurrentState = [];
 
     public function __construct(Config $config, EventDispatcherInterface $eventDispatcher)
     {
@@ -54,24 +71,29 @@ class ConsumerProcess extends Process
             $driver = new ChanDriver($this->config);
             yield $driver->connect();
             for ($i=0; $i<$concurrent; $i++) {
-                asyncCall([$this, 'createConsumer'], $driver, false);
+                asyncCall([$this, 'createConsumer'], $i, $driver, false);
             }
             $driver->loop();
         } else {
             for ($i=0; $i<$concurrent; $i++) {
                 $driver = new $this->config['driver']($this->config);
-                asyncCall([$this, 'createConsumer'], $driver, true);
+                asyncCall([$this, 'createConsumer'], $i, $driver, true);
             }
         }
+
+        yield call([$this, 'statReporter']);
     }
 
-    public function createConsumer(Driver $driver, $connectInConsumer)
+    public function createConsumer($num, Driver $driver, $connectInConsumer)
     {
         if ($connectInConsumer) {
             yield $driver->connect();
         }
 
         while (true) {
+            $this->concurrentState[$num] = null;
+
+            /** @var Message $message */
             $message = yield $driver->pop();
 
             //Allow pop timeout and return null to restart pop, like ping connection.
@@ -79,9 +101,11 @@ class ConsumerProcess extends Process
                 continue;
             }
 
-            /** @var Message $message */
             $job = $message->job;
             $jobClass = get_class($job);
+
+            //Mark concurrent state
+            $this->concurrentState[$num] = ['id'=>$message->id, 'job'=>$jobClass];
 
             try {
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_GET, $jobClass, $message->id));
@@ -105,6 +129,30 @@ class ConsumerProcess extends Process
                 }
             }
         }
+    }
+
+    public function statReporter()
+    {
+        //消费进程状态上报
+        $channel = di()->get(Channel::class);
+
+        $channel->on('wind.stat.tick', function () use ($channel) {
+            $channel->publish('wind.stat.report', [
+                'type' => 'queue_consumer_concurrent',
+                'group' => $this->queue,
+                'pid' => posix_getpid(),
+                'stat' => $this->concurrentState
+            ]);
+        });
+
+        yield delay(500);
+
+        $channel->publish('wind.stat.online', [
+            'pid' => posix_getpid(),
+            'type' => 'queue_consumer_concurrent',
+            'group' => $this->queue,
+            'name' => 'QueueConsumer.'.$this->queue
+        ]);
     }
 
 }
