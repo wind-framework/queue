@@ -9,14 +9,15 @@ use Wind\Process\Process;
 use Wind\Queue\Driver\ChanDriver;
 use Wind\Queue\Driver\Driver;
 use Psr\EventDispatcher\EventDispatcherInterface;
-use Wind\Base\Channel;
+use Wind\Process\Statable;
 
 use function Amp\asyncCall;
 use function Amp\call;
-use function Amp\delay;
 
 class ConsumerProcess extends Process
 {
+
+    use Statable;
 
     /**
      * Queue name
@@ -80,8 +81,6 @@ class ConsumerProcess extends Process
                 asyncCall([$this, 'createConsumer'], $i, $driver, true);
             }
         }
-
-        yield call([$this, 'statReporter']);
     }
 
     public function createConsumer($num, Driver $driver, $connectInConsumer)
@@ -131,28 +130,12 @@ class ConsumerProcess extends Process
         }
     }
 
-    public function statReporter()
-    {
-        //消费进程状态上报
-        $channel = di()->get(Channel::class);
-
-        $channel->on('wind.stat.tick', function () use ($channel) {
-            $channel->publish('wind.stat.report', [
-                'type' => 'queue_consumer_concurrent',
-                'group' => $this->queue,
-                'pid' => posix_getpid(),
-                'stat' => $this->concurrentState
-            ]);
-        });
-
-        yield delay(500);
-
-        $channel->publish('wind.stat.online', [
-            'pid' => posix_getpid(),
+    public function getState() {
+        return [
             'type' => 'queue_consumer_concurrent',
             'group' => $this->queue,
-            'name' => 'QueueConsumer.'.$this->queue
-        ]);
+            'stat' => $this->concurrentState
+        ];
     }
 
 }
