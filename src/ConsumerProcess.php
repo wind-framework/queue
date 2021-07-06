@@ -9,7 +9,7 @@ use Wind\Process\Process;
 use Wind\Queue\Driver\ChanDriver;
 use Wind\Queue\Driver\Driver;
 use Psr\EventDispatcher\EventDispatcherInterface;
-use Wind\Process\Statable;
+use Wind\Process\Stateful;
 
 use function Amp\asyncCall;
 use function Amp\call;
@@ -17,7 +17,7 @@ use function Amp\call;
 class ConsumerProcess extends Process
 {
 
-    use Statable;
+    use Stateful;
 
     /**
      * Queue name
