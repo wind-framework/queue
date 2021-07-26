@@ -120,6 +120,48 @@ class BeanstalkDriver implements Driver
         return $this->client->delete($id);
     }
 
+    public function peekDelayed() {
+        return $this->peekWith('peekDelayed');
+    }
+
+    public function peekReady() {
+        return $this->peekWith('peekReady');
+    }
+
+    public function peekFail()
+    {
+        return $this->peekWith('peekBuried');
+    }
+
+    public function wakeupJob($id) {
+        return $this->client->kickJob($id);
+    }
+
+    public function wakeup($num) {
+        return $this->client->kick($num);
+    }
+
+    public function stats() {
+        return $this->client->statsTube($this->tube);
+    }
+
+    private function peekWith($method)
+    {
+        return call(function() use ($method) {
+            try {
+                $data = yield $this->client->{$method}();
+                $job = unserialize($data['body']);
+                return new Message($job, $data['id']);
+            } catch (BeanstalkException $e) {
+                if ($e->getMessage() == 'NOT_FOUND') {
+                    return null;
+                } else {
+                    throw $e;
+                }
+            }
+        });
+    }
+
     public static function isSupportReuseConnection()
     {
         return false;

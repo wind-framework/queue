@@ -25,6 +25,13 @@ interface Driver
 
     public function fail(Message $message);
 
+    /**
+     * Release reserved job to ready list
+     *
+     * @param Message $message
+     * @param int $delay
+     * @return Promise
+     */
     public function release(Message $message, $delay);
 
     /**
@@ -42,6 +49,45 @@ interface Driver
      * @return bool
      */
     public function delete($id);
+
+    /**
+     * 预览失败列表中的一条消息
+     *
+     * @return Message[]|Promise<Message[]>
+     */
+    public function peekFail();
+
+    /**
+     * 预览延迟列表中的一条消息
+     *
+     * @return Message[]|Promise<Message[]>
+     */
+    public function peekDelayed();
+
+    /**
+     * 预览准备列表中的一条消息
+     *
+     * @return Message[]|Promise<Message[]>
+     */
+    public function peekReady();
+
+    /**
+     * Wakeup a failed job to ready list by job id
+     *
+     * @param int $id
+     * @return Promise
+     */
+    public function wakeupJob($id);
+
+    /**
+     * Wakeup failed jobs to ready list
+     *
+     * @param int $num Number of jobs to wakeup
+     * @return Promise
+     */
+    public function wakeup($num);
+
+    public function stats();
 
     /**
      * 驱动是否支持连接复用
