@@ -16,7 +16,7 @@ class RedisDriver implements Driver
      * @var Redis
      */
     private $redis;
-    private $btimeout = 10;
+    private $blockTimeout = 10;
 
     private $keysReady = [];
     private $keyReserved;
@@ -50,8 +50,8 @@ class RedisDriver implements Driver
         $concurrent = $config['concurrent'] ?? 1;
         $concurrent *= $processes;
 
-        if ($concurrent < $this->btimeout) {
-            $this->btimeout = $concurrent;
+        if ($concurrent < $this->blockTimeout) {
+            $this->blockTimeout = $concurrent;
         }
 
         $this->uniq = StrUtil::randomString(8);
@@ -91,7 +91,7 @@ class RedisDriver implements Driver
             yield $this->ready($this->keyDelay);
             yield $this->ready($this->keyReserved);
 
-            list(, $index) = yield $this->redis->blPop($this->keysReady, $this->btimeout);
+            list(, $index) = yield $this->redis->blPop($this->keysReady, $this->blockTimeout);
             if ($index === null) {
                 return null;
             }
@@ -185,6 +185,103 @@ class RedisDriver implements Driver
         });
     }
 
+    public function peekFail() {
+        return call(function() {
+            $index = yield $this->redis->lIndex($this->keyFail, 0);
+            $message = $this->peekByIndex($index);
+
+            //Remove key if data not exists
+            if ($message === null) {
+                yield $this->redis->lRem($this->keyFail, $index, 1);
+                return null;
+            }
+
+            return $message;
+        });
+    }
+
+    public function peekDelayed() {
+        return call(function() {
+            $result = yield $this->redis->zRange($this->keyDelay, 0, 0, 'WITHSCORES');
+
+            if (!$result) {
+                return null;
+            }
+
+            list($index, $timestamp) = $result;
+
+            $message = yield $this->peekByIndex($index);
+            $message->delayed = (int)$timestamp;
+
+            //Remove key if data not exists
+            if ($message === null) {
+                yield $this->redis->zRem($this->keyDelay, $index);
+            }
+
+            return $message;
+        });
+    }
+
+    public function peekReady() {
+        //Todo: To be implement peekReady
+    }
+
+    private function peekByIndex($index)
+    {
+        return call(function() use ($index) {
+            //get data
+            list($id, $priority, $attempts) = self::unserializeIndex($index);
+            $data = yield $this->redis->hGet($this->keyData, $id);
+
+            //message is already deleted
+            if (!$data) {
+                return null;
+            }
+
+            /* @var Job $job */
+            $job = \unserialize($data);
+            $message = new Message($job, $id, $index);
+            $message->priority = $priority;
+            $message->attempts = $attempts;
+
+            return $message;
+        });
+    }
+
+    public function wakeupJob($id) {
+        //Todo: To be implement wakeupJob
+    }
+
+    public function wakeup($num) {
+        //Todo: To be implement wakeup
+    }
+
+    public function stats() {
+        return call(function() {
+            $data = [
+                'fails' => yield $this->redis->lLen($this->keyFail),
+                'ready' => 0,
+                'delayed' => yield $this->redis->zCard($this->keyDelay),
+                'reserved' => yield $this->redis->zCard($this->keyReserved),
+                'total_jobs' => 0,
+                'next_id' => yield $this->redis->get($this->keyId)
+            ];
+
+            foreach ($this->keysReady as $key) {
+                $data['ready'] += yield $this->redis->lLen($key);
+            }
+
+            $data['total_jobs'] = $data['next_id'];
+
+            $info = yield $this->redis->info('server');
+            preg_match_all('/(\w+):([^\r\n]+)/i', $info, $matchs);
+            $infoArr = array_combine($matchs[1], $matchs[2]);
+            $data['server'] = "Redis {$infoArr['redis_version']} ({$infoArr['os']})";
+
+            return $data;
+        });
+    }
+
     private function getPriorityKey($pri)
     {
         return $this->keysReady[$pri] ?? $this->keysReady[Queue::PRI_NORMAL];
@@ -202,52 +299,6 @@ class RedisDriver implements Driver
     private static function unserializeIndex($index)
     {
         return explode(',', $index);
-    }
-
-    public function peekFail() {
-        //Todo: To be implement.
-    }
-
-    public function peekDelayed() {
-        //Todo: To be implement.
-    }
-
-    public function peekReady() {
-        //Todo: To be implement.
-    }
-
-    public function wakeupJob($id) {
-        //Todo: To be implement.
-    }
-
-    public function wakeup($num) {
-        //Todo: To be implement.//Todo: To be implement.
-    }
-
-    public function stats() {
-        return call(function() {
-            $data = [
-                'fails' => 0,
-                'ready' => 0,
-                'delayed' => 0,
-                'reserved' => 0,
-                'total_jobs' => 0,
-                'next_id' => 0
-            ];
-
-            foreach ($this->keysReady as $key) {
-                $data['ready'] += yield $this->redis->lLen($key);
-            }
-
-            $data['delayed'] = yield $this->redis->zCard($this->keyDelay);
-            $data['reserved'] = yield $this->redis->zCard($this->keyReserved);
-
-            $data['fails'] = yield $this->redis->lLen($this->keyFail);
-            $data['next_id'] = yield $this->redis->get($this->keyId);
-            $data['total_jobs'] = $data['next_id'];
-
-            return $data;
-        });
     }
 
     public static function isSupportReuseConnection()
