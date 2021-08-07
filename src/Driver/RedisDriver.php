@@ -56,7 +56,7 @@ class RedisDriver implements Driver
 
         $this->uniq = StrUtil::randomString(8);
     }
-    
+
     public function connect()
     {
         return $this->redis->connect();
@@ -202,6 +202,52 @@ class RedisDriver implements Driver
     private static function unserializeIndex($index)
     {
         return explode(',', $index);
+    }
+
+    public function peekFail() {
+        //Todo: To be implement.
+    }
+
+    public function peekDelayed() {
+        //Todo: To be implement.
+    }
+
+    public function peekReady() {
+        //Todo: To be implement.
+    }
+
+    public function wakeupJob($id) {
+        //Todo: To be implement.
+    }
+
+    public function wakeup($num) {
+        //Todo: To be implement.//Todo: To be implement.
+    }
+
+    public function stats() {
+        return call(function() {
+            $data = [
+                'fails' => 0,
+                'ready' => 0,
+                'delayed' => 0,
+                'reserved' => 0,
+                'total_jobs' => 0,
+                'next_id' => 0
+            ];
+
+            foreach ($this->keysReady as $key) {
+                $data['ready'] += yield $this->redis->lLen($key);
+            }
+
+            $data['delayed'] = yield $this->redis->zCard($this->keyDelay);
+            $data['reserved'] = yield $this->redis->zCard($this->keyReserved);
+
+            $data['fails'] = yield $this->redis->lLen($this->keyFail);
+            $data['next_id'] = yield $this->redis->get($this->keyId);
+            $data['total_jobs'] = $data['next_id'];
+
+            return $data;
+        });
     }
 
     public static function isSupportReuseConnection()
