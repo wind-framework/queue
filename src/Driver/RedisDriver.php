@@ -120,8 +120,8 @@ class RedisDriver implements Driver
     public function ack(Message $message)
     {
         return call(function() use ($message) {
-            if (yield $this->removeIndex($message)) {
-                return yield $this->redis->hDel($this->keyData, $message->id);
+            if (yield $this->redis->hDel($this->keyData, $message->id)) {
+                return yield $this->removeIndex($message);
             } else {
                 return false;
             }
@@ -132,8 +132,8 @@ class RedisDriver implements Driver
     public function fail(Message $message)
     {
         return call(function() use ($message) {
-            if (yield $this->removeIndex($message)) {
-                return yield $this->redis->rPush($this->keyFail, $message->raw);
+            if (yield $this->redis->rPush($this->keyFail, $message->raw)) {
+                return yield $this->removeIndex($message);
             } else {
                 return false;
             }
@@ -161,6 +161,12 @@ class RedisDriver implements Driver
         return $message->attempts;
     }
 
+    /**
+     * Remove index stored in reserved list.
+     *
+     * @param Message $message
+     * @return Promise<bool>
+     */
     private function removeIndex(Message $message)
     {
         return call(function() use ($message) {
@@ -168,6 +174,11 @@ class RedisDriver implements Driver
         });
     }
 
+    /**
+     * Make delayed queue to ready list
+     *
+     * @param string $queue
+     */
     private function ready($queue)
     {
         return call(function() use ($queue) {
@@ -185,10 +196,18 @@ class RedisDriver implements Driver
         });
     }
 
+    /**
+     * @inheritDoc
+     */
     public function peekFail() {
         return call(function() {
             $index = yield $this->redis->lIndex($this->keyFail, 0);
-            $message = $this->peekByIndex($index);
+
+            if (!$index) {
+                return null;
+            }
+
+            $message = yield $this->peekByIndex($index);
 
             //Remove key if data not exists
             if ($message === null) {
@@ -200,6 +219,9 @@ class RedisDriver implements Driver
         });
     }
 
+    /**
+     * @inheritDoc
+     */
     public function peekDelayed() {
         return call(function() {
             $result = yield $this->redis->zRange($this->keyDelay, 0, 0, 'WITHSCORES');
@@ -254,6 +276,25 @@ class RedisDriver implements Driver
 
     public function wakeup($num) {
         //Todo: To be implement wakeup
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function drop($num) {
+        return call(function() use ($num) {
+            for ($i=0; $i<$num; $i++) {
+                $index = yield $this->redis->lPop($this->keyFail);
+                if ($index === null) {
+                    return $i;
+                }
+
+                list($id) = self::unserializeIndex($index);
+                yield $this->redis->hDel($this->keyData, $id);
+            }
+
+            return $num;
+        });
     }
 
     public function stats() {

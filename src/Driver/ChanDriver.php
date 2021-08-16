@@ -85,6 +85,8 @@ class ChanDriver implements Driver
 
     public function wakeup($num) { return $this->operator->wakeup($num); }
 
+    public function drop($num) { return $this->operator->drop($num); }
+
     public function stats() { return $this->operator->stats(); }
 
     public static function isSupportReuseConnection()

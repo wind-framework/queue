@@ -15,6 +15,7 @@ use function Amp\call;
  * @method Promise<array|null> peekFail() Peek a failed message in queue
  * @method Promise<bool> wakeupJob($id) Wakeup a failed job to ready list by job id
  * @method Promise<int> wakeup($num) Wakeup failed jobs to ready list by special numbers, return the real wakeup count.
+ * @method Promise<int> drop($num) Drop failed job by special numbers, return the real drop count.
  * @method Promise<bool> delete($id) Delete the job by special job id
  * @method Promise<array> stats() Get queue stats
  */
@@ -63,7 +64,7 @@ class Queue
 
     public function __call($name, $args)
     {
-        static $methods = ['delete', 'stats', 'peekReady', 'peekDelayed', 'peekFail'];
+        static $methods = ['delete', 'stats', 'peekReady', 'peekDelayed', 'peekFail', 'drop'];
 
         if (in_array($name, $methods)) {
             return $this->call(function() use ($name, $args) {

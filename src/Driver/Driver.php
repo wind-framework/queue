@@ -87,6 +87,14 @@ interface Driver
      */
     public function wakeup($num);
 
+    /**
+     * Drop failed jobs
+     *
+     * @param int $num
+     * @return Promise
+     */
+    public function drop($num);
+
     public function stats();
 
     /**
