@@ -67,9 +67,15 @@ class RedisDriver implements Driver
         return call(function() use ($message, $delay) {
             $message->id = yield $this->redis->incr($this->keyId);
 
-            //put index
+            $data = \serialize($message->job);
             $index = self::serializeIndex($message);
 
+            yield $this->redis->multi();
+
+            //put data
+            yield $this->redis->hSet($this->keyData, $message->id, $data);
+
+            //put index
             if ($delay == 0) {
                 $queue = $this->getPriorityKey($message->priority);
                 yield $this->redis->rPush($queue, $index);
@@ -77,9 +83,7 @@ class RedisDriver implements Driver
                 yield $this->redis->zAdd($this->keyDelay, time()+$delay, $index);
             }
 
-            //put data
-            $data = \serialize($message->job);
-            yield $this->redis->hSet($this->keyData, $message->id, $data);
+            yield $this->redis->exec();
 
             return $message->id;
         });
