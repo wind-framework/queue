@@ -133,12 +133,29 @@ class BeanstalkDriver implements Driver
         return $this->peekWith('peekBuried');
     }
 
-    public function wakeupJob($id) {
-        return $this->client->kickJob($id);
-    }
-
     public function wakeup($num) {
         return $this->client->kick($num);
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function drop($num) {
+        return call(function() use ($num) {
+            for ($i=0; $i<$num; $i++) {
+                try {
+                    $data = yield $this->client->peekBuried();
+                    yield $this->client->delete($data['id']);
+                } catch (BeanstalkException $e) {
+                    if ($e->getMessage() == 'NOT_FOUND') {
+                        return $i;
+                    } else {
+                        throw $e;
+                    }
+                }
+            }
+            return $num;
+        });
     }
 
     public function stats() {
@@ -151,7 +168,14 @@ class BeanstalkDriver implements Driver
             try {
                 $data = yield $this->client->{$method}();
                 $job = unserialize($data['body']);
-                return new Message($job, $data['id']);
+                $message = new Message($job, $data['id']);
+
+                if ($method == 'peekDelayed') {
+                    $stats = yield $this->client->statsJob($data['id']);
+                    $message->delayed = $stats['time-left'];
+                }
+
+                return $message;
             } catch (BeanstalkException $e) {
                 if ($e->getMessage() == 'NOT_FOUND') {
                     return null;

@@ -67,10 +67,6 @@ class RedisDriver implements Driver
         return call(function() use ($message, $delay) {
             $message->id = yield $this->redis->incr($this->keyId);
 
-            //put data
-            $data = \serialize($message->job);
-            yield $this->redis->hSet($this->keyData, $message->id, $data);
-
             //put index
             $index = self::serializeIndex($message);
 
@@ -80,6 +76,10 @@ class RedisDriver implements Driver
             } else {
                 yield $this->redis->zAdd($this->keyDelay, time()+$delay, $index);
             }
+
+            //put data
+            $data = \serialize($message->job);
+            yield $this->redis->hSet($this->keyData, $message->id, $data);
 
             return $message->id;
         });
@@ -233,11 +233,13 @@ class RedisDriver implements Driver
             list($index, $timestamp) = $result;
 
             $message = yield $this->peekByIndex($index);
-            $message->delayed = (int)$timestamp;
 
             //Remove key if data not exists
             if ($message === null) {
                 yield $this->redis->zRem($this->keyDelay, $index);
+            } else {
+                $delayed = $timestamp - time();
+                $message->delayed = $delayed > 0 ? $delayed : 0;
             }
 
             return $message;
@@ -245,7 +247,17 @@ class RedisDriver implements Driver
     }
 
     public function peekReady() {
-        //Todo: To be implement peekReady
+        return call(function() {
+            $index = (yield $this->redis->lIndex($this->keysReady[Queue::PRI_HIGH], 0))
+                ?: (yield $this->redis->lIndex($this->keysReady[Queue::PRI_NORMAL], 0))
+                ?: (yield $this->redis->lIndex($this->keysReady[Queue::PRI_LOW], 0));
+
+            if (!$index) {
+                return null;
+            }
+
+            return yield $this->peekByIndex($index);
+        });
     }
 
     private function peekByIndex($index)
@@ -270,12 +282,21 @@ class RedisDriver implements Driver
         });
     }
 
-    public function wakeupJob($id) {
-        //Todo: To be implement wakeupJob
-    }
-
     public function wakeup($num) {
-        //Todo: To be implement wakeup
+        return call(function() use ($num) {
+            for ($i=0; $i<$num; $i++) {
+                $index = yield $this->redis->lPop($this->keyFail);
+                if ($index === null) {
+                    return $i;
+                }
+
+                list(, $priority) = self::unserializeIndex($index);
+                $queue = $this->getPriorityKey($priority);
+                yield $this->redis->rPush($queue, $index);
+            }
+
+            return $num;
+        });
     }
 
     /**

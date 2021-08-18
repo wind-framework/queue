@@ -72,14 +72,6 @@ interface Driver
     public function peekReady();
 
     /**
-     * Wakeup a failed job to ready list by job id
-     *
-     * @param int $id
-     * @return Promise
-     */
-    public function wakeupJob($id);
-
-    /**
      * Wakeup failed jobs to ready list
      *
      * @param int $num Number of jobs to wakeup
