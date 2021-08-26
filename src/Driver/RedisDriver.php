@@ -67,23 +67,24 @@ class RedisDriver implements Driver
         return call(function() use ($message, $delay) {
             $message->id = yield $this->redis->incr($this->keyId);
 
-            $data = \serialize($message->job);
-            $index = self::serializeIndex($message);
+            yield $this->redis->transcation(function($transcation) use ($message, $delay) {
+                /**
+                 * @var \Wind\Redis\Transcation $transcation
+                 */
+                $data = \serialize($message->job);
+                $index = self::serializeIndex($message);
 
-            // yield $this->redis->multi();
+                //put data
+                yield $transcation->hSet($this->keyData, $message->id, $data);
 
-            //put data
-            yield $this->redis->hSet($this->keyData, $message->id, $data);
-
-            //put index
-            if ($delay == 0) {
-                $queue = $this->getPriorityKey($message->priority);
-                yield $this->redis->rPush($queue, $index);
-            } else {
-                yield $this->redis->zAdd($this->keyDelay, time()+$delay, $index);
-            }
-
-            // yield $this->redis->exec();
+                //put index
+                if ($delay == 0) {
+                    $queue = $this->getPriorityKey($message->priority);
+                    yield $transcation->rPush($queue, $index);
+                } else {
+                    yield $transcation->zAdd($this->keyDelay, time()+$delay, $index);
+                }
+            });
 
             return $message->id;
         });
@@ -187,7 +188,7 @@ class RedisDriver implements Driver
     {
         return call(function() use ($queue) {
             $now = time();
-            $options = ['LIMIT', 0, 128];
+            $options = ['LIMIT', 0, 256];
             if ($expires = yield $this->redis->zrevrangebyscore($queue, $now, '-inf', $options)) {
                 foreach ($expires as $index) {
                     if ((yield $this->redis->zRem($queue, $index)) > 0) {
