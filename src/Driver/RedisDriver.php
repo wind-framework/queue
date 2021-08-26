@@ -72,6 +72,9 @@ class RedisDriver implements Driver
 
             // yield $this->redis->multi();
 
+            //put data
+            yield $this->redis->hSet($this->keyData, $message->id, $data);
+
             //put index
             if ($delay == 0) {
                 $queue = $this->getPriorityKey($message->priority);
@@ -79,9 +82,6 @@ class RedisDriver implements Driver
             } else {
                 yield $this->redis->zAdd($this->keyDelay, time()+$delay, $index);
             }
-
-            //put data
-            yield $this->redis->hSet($this->keyData, $message->id, $data);
 
             // yield $this->redis->exec();
 
