@@ -70,10 +70,7 @@ class RedisDriver implements Driver
             $data = \serialize($message->job);
             $index = self::serializeIndex($message);
 
-            yield $this->redis->multi();
-
-            //put data
-            yield $this->redis->hSet($this->keyData, $message->id, $data);
+            // yield $this->redis->multi();
 
             //put index
             if ($delay == 0) {
@@ -83,7 +80,10 @@ class RedisDriver implements Driver
                 yield $this->redis->zAdd($this->keyDelay, time()+$delay, $index);
             }
 
-            yield $this->redis->exec();
+            //put data
+            yield $this->redis->hSet($this->keyData, $message->id, $data);
+
+            // yield $this->redis->exec();
 
             return $message->id;
         });
