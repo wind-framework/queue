@@ -67,22 +67,22 @@ class RedisDriver implements Driver
         return call(function() use ($message, $delay) {
             $message->id = yield $this->redis->incr($this->keyId);
 
-            yield $this->redis->transcation(function($transcation) use ($message, $delay) {
+            yield $this->redis->transaction(function($transaction) use ($message, $delay) {
                 /**
-                 * @var \Wind\Redis\Transcation $transcation
+                 * @var \Wind\Redis\Transaction $transaction
                  */
                 $data = \serialize($message->job);
                 $index = self::serializeIndex($message);
 
                 //put data
-                yield $transcation->hSet($this->keyData, $message->id, $data);
+                yield $transaction->hSet($this->keyData, $message->id, $data);
 
                 //put index
                 if ($delay == 0) {
                     $queue = $this->getPriorityKey($message->priority);
-                    yield $transcation->rPush($queue, $index);
+                    yield $transaction->rPush($queue, $index);
                 } else {
-                    yield $transcation->zAdd($this->keyDelay, time()+$delay, $index);
+                    yield $transaction->zAdd($this->keyDelay, time()+$delay, $index);
                 }
             });
 
