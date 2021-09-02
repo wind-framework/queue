@@ -2,21 +2,19 @@
 
 namespace Wind\Queue;
 
-use Amp\Promise;
 use RuntimeException;
 use Wind\Queue\Driver\Driver;
-use function Amp\call;
 
 /**
  * Queue Instance Class
  *
- * @method Promise<array|null> peekReady() Peek a ready message in queue
- * @method Promise<array|null> peekDelayed() Peek a delayed message in queue
- * @method Promise<array|null> peekFail() Peek a failed message in queue
- * @method Promise<int> wakeup($num) Wakeup failed jobs to ready list by special numbers, return the real wakeup count.
- * @method Promise<int> drop($num) Drop failed job by special numbers, return the real drop count.
- * @method Promise<bool> delete($id) Delete the job by special job id
- * @method Promise<array> stats() Get queue stats
+ * @method Message|null peekReady() Peek a ready message in queue
+ * @method Message|null peekDelayed() Peek a delayed message in queue
+ * @method Message|null peekFail() Peek a failed message in queue
+ * @method int wakeup($num) Wakeup failed jobs to ready list by special numbers, return the real wakeup count.
+ * @method int drop($num) Drop failed job by special numbers, return the real drop count.
+ * @method bool delete($id) Delete the job by special job id
+ * @method array stats() Get queue stats
  */
 class Queue
 {
@@ -31,15 +29,10 @@ class Queue
      */
     private $driver;
 
-    /**
-     * @var Promise|null
-     */
-    private $connecting;
-
     public function __construct(Driver $driver)
     {
         $this->driver = $driver;
-        $this->connecting = $driver->connect();
+        $driver->connect();
     }
 
 	/**
@@ -50,15 +43,13 @@ class Queue
 	 * @param int $priority The message priority, small number mean higher, big number mean lower.
 	 * For safety, use PRI_ prefix constant is recommend, some driver (like RedisDriver)
 	 * not support too much priority.
-	 * @return Promise<int> The Job id, you can delete the job use id before consume.
+	 * @return int The Job id, you can delete the job use id before consume.
 	 */
     public function put(Job $job, $delay=0, $priority=self::PRI_NORMAL)
     {
         $message = new Message($job);
         $message->priority = $priority;
-        return $this->call(function() use ($message, $delay) {
-            return $this->driver->push($message, $delay);
-        });
+        return $this->driver->push($message, $delay);
     }
 
     public function __call($name, $args)
@@ -66,29 +57,9 @@ class Queue
         static $methods = ['delete', 'stats', 'peekReady', 'peekDelayed', 'peekFail', 'wakeup', 'drop'];
 
         if (in_array($name, $methods)) {
-            return $this->call(function() use ($name, $args) {
-                return call_user_func_array([$this->driver, $name], $args);
-            });
+            return call_user_func_array([$this->driver, $name], $args);
         } else {
             throw new RuntimeException("Call to undefined method ".__CLASS__."::$name()");
-        }
-    }
-
-    /**
-     * Wait for connected and do the call
-     *
-     * @param callable $callback
-     * @return Promise
-     */
-    private function call($callback) {
-        if ($this->connecting !== null) {
-            return call(function() use ($callback) {
-                yield $this->connecting;
-                $this->connecting = null;
-                return $callback();
-            });
-        } else {
-            return $callback();
         }
     }
 

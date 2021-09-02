@@ -6,7 +6,6 @@ use Wind\Beanstalk\BeanstalkClient;
 use Wind\Beanstalk\BeanstalkException;
 use Wind\Queue\Message;
 use Wind\Queue\Queue;
-use function Amp\call;
 
 class BeanstalkDriver implements Driver
 {
@@ -47,15 +46,13 @@ class BeanstalkDriver implements Driver
 
     public function connect()
     {
-        return call(function() {
-            yield $this->client->connect();
+        $this->client->connect();
 
-            if ($this->tube != 'default') {
-                yield $this->client->watch($this->tube);
-                yield $this->client->ignore('default');
-                yield $this->client->useTube($this->tube);
-            }
-        });
+        if ($this->tube != 'default') {
+            $this->client->watch($this->tube);
+            $this->client->ignore('default');
+            $this->client->useTube($this->tube);
+        }
     }
 
     public function push(Message $message, $delay)
@@ -74,19 +71,17 @@ class BeanstalkDriver implements Driver
 
     public function pop()
     {
-        return call(function() {
-            try {
-                $data = yield $this->client->reserve($this->reserveTimeout);
-                $job = unserialize($data['body']);
-                return new Message($job, $data['id']);
-            } catch (BeanstalkException $e) {
-                switch ($e->getMessage()) {
-                    case 'DEADLINE_SOON':
-                    case 'TIMED_OUT': return null;
-                    default: throw $e;
-                }
+        try {
+            $data = $this->client->reserve($this->reserveTimeout);
+            $job = unserialize($data['body']);
+            return new Message($job, $data['id']);
+        } catch (BeanstalkException $e) {
+            switch ($e->getMessage()) {
+                case 'DEADLINE_SOON':
+                case 'TIMED_OUT': return null;
+                default: throw $e;
             }
-        });
+        }
     }
 
     public function ack(Message $message)
@@ -101,18 +96,14 @@ class BeanstalkDriver implements Driver
 
     public function release(Message $message, $delay)
     {
-        return call(function() use ($message, $delay) {
-            $state = yield $this->client->statsJob($message->id);
-            return $this->client->release($message->id, $state['pri'], $delay);
-        });
+        $state = $this->client->statsJob($message->id);
+        return $this->client->release($message->id, $state['pri'], $delay);
     }
 
     public function attempts(Message $message)
     {
-        return call(function() use ($message) {
-            $state = yield $this->client->statsJob($message->id);
-            return $state['releases'];
-        });
+        $state = $this->client->statsJob($message->id);
+        return $state['releases'];
     }
 
     public function delete($id)
@@ -141,21 +132,19 @@ class BeanstalkDriver implements Driver
      * @inheritDoc
      */
     public function drop($num) {
-        return call(function() use ($num) {
-            for ($i=0; $i<$num; $i++) {
-                try {
-                    $data = yield $this->client->peekBuried();
-                    yield $this->client->delete($data['id']);
-                } catch (BeanstalkException $e) {
-                    if ($e->getMessage() == 'NOT_FOUND') {
-                        return $i;
-                    } else {
-                        throw $e;
-                    }
+        for ($i=0; $i<$num; $i++) {
+            try {
+                $data = $this->client->peekBuried();
+                $this->client->delete($data['id']);
+            } catch (BeanstalkException $e) {
+                if ($e->getMessage() == 'NOT_FOUND') {
+                    return $i;
+                } else {
+                    throw $e;
                 }
             }
-            return $num;
-        });
+        }
+        return $num;
     }
 
     public function stats() {
@@ -164,26 +153,24 @@ class BeanstalkDriver implements Driver
 
     private function peekWith($method)
     {
-        return call(function() use ($method) {
-            try {
-                $data = yield $this->client->{$method}();
-                $job = unserialize($data['body']);
-                $message = new Message($job, $data['id']);
+        try {
+            $data = $this->client->{$method}();
+            $job = unserialize($data['body']);
+            $message = new Message($job, $data['id']);
 
-                if ($method == 'peekDelayed') {
-                    $stats = yield $this->client->statsJob($data['id']);
-                    $message->delayed = $stats['time-left'];
-                }
-
-                return $message;
-            } catch (BeanstalkException $e) {
-                if ($e->getMessage() == 'NOT_FOUND') {
-                    return null;
-                } else {
-                    throw $e;
-                }
+            if ($method == 'peekDelayed') {
+                $stats = $this->client->statsJob($data['id']);
+                $message->delayed = $stats['time-left'];
             }
-        });
+
+            return $message;
+        } catch (BeanstalkException $e) {
+            if ($e->getMessage() == 'NOT_FOUND') {
+                return null;
+            } else {
+                throw $e;
+            }
+        }
     }
 
     public static function isSupportReuseConnection()

@@ -2,7 +2,6 @@
 
 namespace Wind\Queue\Driver;
 
-use Amp\Promise;
 use Wind\Queue\Message;
 
 interface Driver
@@ -19,6 +18,11 @@ interface Driver
      */
     public function push(Message $message, int $delay);
 
+    /**
+     * Pop a message
+     *
+     * @return Message|null
+     */
     public function pop();
 
     public function ack(Message $message);
@@ -30,7 +34,7 @@ interface Driver
      *
      * @param Message $message
      * @param int $delay
-     * @return Promise
+     * @return void
      */
     public function release(Message $message, $delay);
 
@@ -38,7 +42,7 @@ interface Driver
      * 获取消息的已尝试次数
      *
      * @param Message $message
-     * @return int|Promise<int>
+     * @return int
      */
     public function attempts(Message $message);
 
@@ -53,21 +57,21 @@ interface Driver
     /**
      * 预览失败列表中的一条消息
      *
-     * @return Message[]|Promise<Message[]>
+     * @return Message
      */
     public function peekFail();
 
     /**
      * 预览延迟列表中的一条消息
      *
-     * @return Message[]|Promise<Message[]>
+     * @return Message
      */
     public function peekDelayed();
 
     /**
      * 预览准备列表中的一条消息
      *
-     * @return Message[]|Promise<Message[]>
+     * @return Message
      */
     public function peekReady();
 
@@ -75,7 +79,7 @@ interface Driver
      * Wakeup failed jobs to ready list
      *
      * @param int $num Number of jobs to wakeup
-     * @return Promise
+     * @return int
      */
     public function wakeup($num);
 
@@ -83,7 +87,7 @@ interface Driver
      * Drop failed jobs
      *
      * @param int $num
-     * @return Promise
+     * @return int
      */
     public function drop($num);
 

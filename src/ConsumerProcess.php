@@ -11,8 +11,7 @@ use Wind\Queue\Driver\Driver;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Wind\Process\Stateful;
 
-use function Amp\asyncCall;
-use function Amp\call;
+use function Amp\defer;
 
 class ConsumerProcess extends Process
 {
@@ -70,15 +69,15 @@ class ConsumerProcess extends Process
         //Use ChanDriver to optimize to connections.
         if ($concurrent > 2 && $this->config['driver']::isSupportReuseConnection()) {
             $driver = new ChanDriver($this->config);
-            yield $driver->connect();
+            $driver->connect();
             for ($i=0; $i<$concurrent; $i++) {
-                asyncCall([$this, 'createConsumer'], $i, $driver, false);
+                defer([$this, 'createConsumer'], $i, $driver, false);
             }
             $driver->loop();
         } else {
             for ($i=0; $i<$concurrent; $i++) {
                 $driver = new $this->config['driver']($this->config);
-                asyncCall([$this, 'createConsumer'], $i, $driver, true);
+                defer([$this, 'createConsumer'], $i, $driver, true);
             }
         }
     }
@@ -86,14 +85,13 @@ class ConsumerProcess extends Process
     public function createConsumer($num, Driver $driver, $connectInConsumer)
     {
         if ($connectInConsumer) {
-            yield $driver->connect();
+            $driver->connect();
         }
 
         while (true) {
             $this->concurrentState[$num] = null;
 
-            /** @var Message $message */
-            $message = yield $driver->pop();
+            $message = $driver->pop();
 
             //Allow pop timeout and return null to restart pop, like ping connection.
             if ($message === null) {
@@ -108,22 +106,21 @@ class ConsumerProcess extends Process
 
             try {
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_GET, $jobClass, $message->id));
-                yield call([$job, 'handle']);
-                yield $driver->ack($message);
+                $job->handle();
+                $driver->ack($message);
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_SUCCEED, $jobClass, $message->id));
             } catch (\Exception $e) {
                 $attempts = $driver->attempts($message);
-                ($attempts instanceof Promise) && $attempts = yield $attempts;
 
                 if ($attempts < $message->job->maxAttempts) {
                     $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_ERROR, $jobClass, $message->id, $e));
-                    yield $driver->release($message, $attempts+1);
+                    $driver->release($message, $attempts+1);
                 } else {
                     $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_FAILED, $jobClass, $message->id, $e));
-                    if (yield call([$job, 'fail'], $message, $e)) {
-                        yield $driver->fail($message);
+                    if ($job->fail($message, $e)) {
+                        $driver->fail($message);
                     } else {
-                        yield $driver->delete($message->id);
+                        $driver->delete($message->id);
                     }
                 }
             }
