@@ -2,11 +2,10 @@
     "name": "wind-framework/queue",
     "description": "Wind framework message queue component.",
     "type": "library",
-    "version": "1.0.0-dev",
     "require": {
-        "wind-framework/wind-framework": "1.0.0-dev",
-        "wind-framework/redis": "1.0.0-dev",
-        "wind-framework/beanstalk": "1.0.0-dev"
+        "wind-framework/wind-framework": "1.0.x-dev",
+        "wind-framework/redis": "1.0.x-dev",
+        "wind-framework/beanstalk": "1.0.x-dev"
     },
     "license": "Apache-2.0",
     "authors": [
