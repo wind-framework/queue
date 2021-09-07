@@ -111,7 +111,7 @@ class ConsumerProcess extends Process
                 yield call([$job, 'handle']);
                 yield $driver->ack($message);
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_SUCCEED, $jobClass, $message->id));
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 $attempts = $driver->attempts($message);
                 ($attempts instanceof Promise) && $attempts = yield $attempts;
 
