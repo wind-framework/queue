@@ -2,7 +2,6 @@
 
 namespace Wind\Queue;
 
-use Amp\Promise;
 use Exception;
 use Wind\Base\Config;
 use Wind\Process\Process;
@@ -109,7 +108,7 @@ class ConsumerProcess extends Process
                 $job->handle();
                 $driver->ack($message);
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_SUCCEED, $jobClass, $message->id));
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 $attempts = $driver->attempts($message);
 
                 if ($attempts < $message->job->maxAttempts) {
