@@ -45,9 +45,6 @@ class ChanDriver implements Driver
         return all([$this->popper->connect(), $this->operator->connect()]);
     }
 
-    /**
-     * @inheritDoc
-     */
     public function push(Message $message, int $delay)
     {
         return $this->operator->push($message, $delay);
@@ -68,33 +65,29 @@ class ChanDriver implements Driver
         });
     }
 
-    public function ack(Message $message)
-    {
-        return $this->operator->ack($message);
-    }
+    public function ack(Message $message) { return $this->operator->ack($message); }
 
-    public function fail(Message $message)
-    {
-        return $this->operator->fail($message);
-    }
+    public function fail(Message $message) { return $this->operator->fail($message); }
 
-    public function release(Message $message, $delay)
-    {
-        return $this->operator->release($message, $delay);
-    }
+    public function release(Message $message, $delay)  { return $this->operator->release($message, $delay); }
 
-    /**
-     * @inheritDoc
-     */
-    public function delete($id)
-    {
-        return $this->operator->delete($id);
-    }
+    public function delete($id) { return $this->operator->delete($id); }
 
-    public function attempts(Message $message)
-    {
-        return $this->operator->attempts($message);
-    }
+    public function attempts(Message $message) { return $this->operator->attempts($message); }
+
+    public function peekDelayed() { return $this->operator->peekDelayed(); }
+
+    public function peekReady() { return $this->operator->peekReady(); }
+
+    public function peekFail() { return $this->operator->peekFail(); }
+
+    public function wakeupJob($id) { return $this->operator->wakeup($id); }
+
+    public function wakeup($num) { return $this->operator->wakeup($num); }
+
+    public function drop($num) { return $this->operator->drop($num); }
+
+    public function stats() { return $this->operator->stats(); }
 
     public static function isSupportReuseConnection()
     {

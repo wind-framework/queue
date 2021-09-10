@@ -16,7 +16,7 @@ class RedisDriver implements Driver
      * @var Redis
      */
     private $redis;
-    private $btimeout = 10;
+    private $blockTimeout = 10;
 
     private $keysReady = [];
     private $keyReserved;
@@ -50,11 +50,13 @@ class RedisDriver implements Driver
         $concurrent = $config['concurrent'] ?? 1;
         $concurrent *= $processes;
 
-        if ($concurrent < $this->btimeout) {
-            $this->btimeout = $concurrent;
+        if ($concurrent < $this->blockTimeout) {
+            $this->blockTimeout = $concurrent;
         }
+
+        $this->uniq = StrUtil::randomString(8);
     }
-    
+
     public function connect()
     {
         return $this->redis->connect();
@@ -65,19 +67,24 @@ class RedisDriver implements Driver
         return call(function() use ($message, $delay) {
             $message->id = yield $this->redis->incr($this->keyId);
 
-            //put data
-            $data = \serialize($message->job);
-            yield $this->redis->hSet($this->keyData, $message->id, $data);
+            yield $this->redis->transaction(function($transaction) use ($message, $delay) {
+                /**
+                 * @var \Wind\Redis\Transaction $transaction
+                 */
+                $data = \serialize($message->job);
+                $index = self::serializeIndex($message);
 
-            //put index
-            $index = self::serializeIndex($message);
+                //put data
+                yield $transaction->hSet($this->keyData, $message->id, $data);
 
-            if ($delay == 0) {
-                $queue = $this->getPriorityKey($message->priority);
-                yield $this->redis->rPush($queue, $index);
-            } else {
-                yield $this->redis->zAdd($this->keyDelay, time()+$delay, $index);
-            }
+                //put index
+                if ($delay == 0) {
+                    $queue = $this->getPriorityKey($message->priority);
+                    yield $transaction->rPush($queue, $index);
+                } else {
+                    yield $transaction->zAdd($this->keyDelay, time()+$delay, $index);
+                }
+            });
 
             return $message->id;
         });
@@ -89,7 +96,7 @@ class RedisDriver implements Driver
             yield $this->ready($this->keyDelay);
             yield $this->ready($this->keyReserved);
 
-            list(, $index) = yield $this->redis->blPop($this->keysReady, $this->btimeout);
+            list(, $index) = yield $this->redis->blPop($this->keysReady, $this->blockTimeout);
             if ($index === null) {
                 return null;
             }
@@ -119,8 +126,7 @@ class RedisDriver implements Driver
     {
         return call(function() use ($message) {
             if (yield $this->redis->hDel($this->keyData, $message->id)) {
-                yield $this->removeIndex($message);
-                return true;
+                return yield $this->removeIndex($message);
             } else {
                 return false;
             }
@@ -131,8 +137,8 @@ class RedisDriver implements Driver
     public function fail(Message $message)
     {
         return call(function() use ($message) {
-            if (yield $this->removeIndex($message)) {
-                return yield $this->redis->rPush($this->keyFail, $message->raw);
+            if (yield $this->redis->rPush($this->keyFail, $message->raw)) {
+                return yield $this->removeIndex($message);
             } else {
                 return false;
             }
@@ -160,6 +166,12 @@ class RedisDriver implements Driver
         return $message->attempts;
     }
 
+    /**
+     * Remove index stored in reserved list.
+     *
+     * @param Message $message
+     * @return Promise<bool>
+     */
     private function removeIndex(Message $message)
     {
         return call(function() use ($message) {
@@ -167,11 +179,16 @@ class RedisDriver implements Driver
         });
     }
 
+    /**
+     * Make delayed queue to ready list
+     *
+     * @param string $queue
+     */
     private function ready($queue)
     {
         return call(function() use ($queue) {
             $now = time();
-            $options = ['LIMIT', 0, 128];
+            $options = ['LIMIT', 0, 256];
             if ($expires = yield $this->redis->zrevrangebyscore($queue, $now, '-inf', $options)) {
                 foreach ($expires as $index) {
                     if ((yield $this->redis->zRem($queue, $index)) > 0) {
@@ -181,6 +198,154 @@ class RedisDriver implements Driver
                     }
                 }
             }
+        });
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function peekFail() {
+        return call(function() {
+            $index = yield $this->redis->lIndex($this->keyFail, 0);
+
+            if (!$index) {
+                return null;
+            }
+
+            $message = yield $this->peekByIndex($index);
+
+            //Remove key if data not exists
+            if ($message === null) {
+                yield $this->redis->lRem($this->keyFail, $index, 1);
+                return null;
+            }
+
+            return $message;
+        });
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function peekDelayed() {
+        return call(function() {
+            $result = yield $this->redis->zRange($this->keyDelay, 0, 0, 'WITHSCORES');
+
+            if (!$result) {
+                return null;
+            }
+
+            list($index, $timestamp) = $result;
+
+            $message = yield $this->peekByIndex($index);
+
+            //Remove key if data not exists
+            if ($message === null) {
+                yield $this->redis->zRem($this->keyDelay, $index);
+            } else {
+                $delayed = $timestamp - time();
+                $message->delayed = $delayed > 0 ? $delayed : 0;
+            }
+
+            return $message;
+        });
+    }
+
+    public function peekReady() {
+        return call(function() {
+            $index = (yield $this->redis->lIndex($this->keysReady[Queue::PRI_HIGH], 0))
+                ?: (yield $this->redis->lIndex($this->keysReady[Queue::PRI_NORMAL], 0))
+                ?: (yield $this->redis->lIndex($this->keysReady[Queue::PRI_LOW], 0));
+
+            if (!$index) {
+                return null;
+            }
+
+            return yield $this->peekByIndex($index);
+        });
+    }
+
+    private function peekByIndex($index)
+    {
+        return call(function() use ($index) {
+            //get data
+            list($id, $priority, $attempts) = self::unserializeIndex($index);
+            $data = yield $this->redis->hGet($this->keyData, $id);
+
+            //message is already deleted
+            if (!$data) {
+                return null;
+            }
+
+            /* @var Job $job */
+            $job = \unserialize($data);
+            $message = new Message($job, $id, $index);
+            $message->priority = $priority;
+            $message->attempts = $attempts;
+
+            return $message;
+        });
+    }
+
+    public function wakeup($num) {
+        return call(function() use ($num) {
+            for ($i=0; $i<$num; $i++) {
+                $index = yield $this->redis->lPop($this->keyFail);
+                if ($index === null) {
+                    return $i;
+                }
+
+                list(, $priority) = self::unserializeIndex($index);
+                $queue = $this->getPriorityKey($priority);
+                yield $this->redis->rPush($queue, $index);
+            }
+
+            return $num;
+        });
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function drop($num) {
+        return call(function() use ($num) {
+            for ($i=0; $i<$num; $i++) {
+                $index = yield $this->redis->lPop($this->keyFail);
+                if ($index === null) {
+                    return $i;
+                }
+
+                list($id) = self::unserializeIndex($index);
+                yield $this->redis->hDel($this->keyData, $id);
+            }
+
+            return $num;
+        });
+    }
+
+    public function stats() {
+        return call(function() {
+            $data = [
+                'fails' => yield $this->redis->lLen($this->keyFail),
+                'ready' => 0,
+                'delayed' => yield $this->redis->zCard($this->keyDelay),
+                'reserved' => yield $this->redis->zCard($this->keyReserved),
+                'total_jobs' => 0,
+                'next_id' => yield $this->redis->get($this->keyId)
+            ];
+
+            foreach ($this->keysReady as $key) {
+                $data['ready'] += yield $this->redis->lLen($key);
+            }
+
+            $data['total_jobs'] = $data['next_id'];
+
+            $info = yield $this->redis->info('server');
+            preg_match_all('/(\w+):([^\r\n]+)/i', $info, $matchs);
+            $infoArr = array_combine($matchs[1], $matchs[2]);
+            $data['server'] = "Redis {$infoArr['redis_version']} ({$infoArr['os']})";
+
+            return $data;
         });
     }
 

@@ -36,6 +36,13 @@ class Message
      */
     public $priority;
 
+    /**
+     * Delayed at timestamp
+     *
+     * @var int|null
+     */
+    public $delayed;
+
     public function __construct(Job $job, $id=null, $raw=null)
     {
         $this->job = $job;

@@ -3,9 +3,21 @@
 namespace Wind\Queue;
 
 use Amp\Promise;
+use RuntimeException;
 use Wind\Queue\Driver\Driver;
 use function Amp\call;
 
+/**
+ * Queue Instance Class
+ *
+ * @method Promise<array|null> peekReady() Peek a ready message in queue
+ * @method Promise<array|null> peekDelayed() Peek a delayed message in queue
+ * @method Promise<array|null> peekFail() Peek a failed message in queue
+ * @method Promise<int> wakeup($num) Wakeup failed jobs to ready list by special numbers, return the real wakeup count.
+ * @method Promise<int> drop($num) Drop failed job by special numbers, return the real drop count.
+ * @method Promise<bool> delete($id) Delete the job by special job id
+ * @method Promise<array> stats() Get queue stats
+ */
 class Queue
 {
 
@@ -49,19 +61,17 @@ class Queue
         });
     }
 
-	/**
-	 * Delete the job
-	 *
-	 * The job can be delete only before job consume.
-	 *
-	 * @param int $id Job Id
-	 * @return Promise<bool>
-	 */
-    public function delete($id)
+    public function __call($name, $args)
     {
-        return $this->call(function() use ($id) {
-            return $this->driver->delete($id);
-        });
+        static $methods = ['delete', 'stats', 'peekReady', 'peekDelayed', 'peekFail', 'wakeup', 'drop'];
+
+        if (in_array($name, $methods)) {
+            return $this->call(function() use ($name, $args) {
+                return call_user_func_array([$this->driver, $name], $args);
+            });
+        } else {
+            throw new RuntimeException("Call to undefined method ".__CLASS__."::$name()");
+        }
     }
 
     /**
