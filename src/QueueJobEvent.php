@@ -15,7 +15,7 @@ class QueueJobEvent extends \Wind\Event\Event
     public $id;
     public $error;
 
-    public function __construct($state, string $job=null, string $id=null, \Exception $error=null)
+    public function __construct($state, string $job=null, string $id=null, \Throwable $error=null)
     {
         $this->state = $state;
         $this->job = $job;
