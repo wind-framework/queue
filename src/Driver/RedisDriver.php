@@ -30,7 +30,10 @@ class RedisDriver implements Driver
      */
     public function __construct($config)
     {
-        $this->redis = empty($config['use_single_instance']) ? di()->make(Redis::class) : di()->get(Redis::class);
+        //only default connection and use_single_instance will persist
+        $connection = isset($config['connection']) ? $config['connection'] : 'default';
+        $persist = $connection == 'default' && !empty($config['use_single_instance']);
+        $this->redis = $persist ? di()->get(Redis::class) : new Redis($connection);
 
         $rk = $config['key'].':ready';
         $this->keysReady = [
