@@ -4,7 +4,7 @@
     "type": "library",
     "version": "0.1.6",
     "require": {
-        "wind-framework/wind-framework": "^0.2.1",
+        "wind-framework/wind-framework": "^0.2",
         "wind-framework/redis": "~0.1",
         "wind-framework/beanstalk": "~0.1"
     },
