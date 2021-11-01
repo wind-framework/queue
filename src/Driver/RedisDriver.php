@@ -6,7 +6,6 @@ use Wind\Queue\Job;
 use Wind\Queue\Message;
 use Wind\Queue\Queue;
 use Wind\Redis\Redis;
-use Wind\Utils\StrUtil;
 use function Amp\call;
 
 class RedisDriver implements Driver
@@ -33,7 +32,7 @@ class RedisDriver implements Driver
         //only default connection and use_single_instance will persist
         $connection = isset($config['connection']) ? $config['connection'] : 'default';
         $persist = $connection == 'default' && !empty($config['use_single_instance']);
-        $this->redis = $persist ? di()->get(Redis::class) : new Redis($connection);
+        $this->redis = $persist ? di()->get(Redis::class) : di()->make(Redis::class, compact('connection'));
 
         $rk = $config['key'].':ready';
         $this->keysReady = [
@@ -56,8 +55,6 @@ class RedisDriver implements Driver
         if ($concurrent < $this->blockTimeout) {
             $this->blockTimeout = $concurrent;
         }
-
-        $this->uniq = StrUtil::randomString(8);
     }
 
     public function connect()
