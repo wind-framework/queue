@@ -168,33 +168,35 @@ class DbDriver implements Driver
 
             try {
                 //Wait for channel
-                $channel = yield $transaction->query("SELECT `id` FROM `".$this->db->prefix($this->tableSync)."` WHERE `id`='{$this->channelId}' FOR UPDATE");
+                yield $transaction->query("SELECT `id` FROM `".$this->db->prefix($this->tableSync)."` WHERE `id`='{$this->channelId}' FOR UPDATE");
 
-                if ($channel) {
-                    //get message
-                    $data = yield $transaction->table($this->tableData)
-                        ->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed <='=>time()])
-                        ->orderBy(['priority'=>SORT_ASC])
-                        ->limit(1)
-                        ->fetchOne();
+                //get message
+                $data = yield $transaction->table($this->tableData)
+                    ->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed <='=>time()])
+                    ->orderBy(['priority'=>SORT_ASC])
+                    ->limit(1)
+                    ->fetchOne();
 
-                    if ($data) {
-                        //update message status
-                        yield $transaction->table($this->tableData)
-                            ->where(['id'=>$data['id']])
-                            ->update(['status'=>1]);
+                if ($data) {
+                    //update message status
+                    yield $transaction->table($this->tableData)
+                        ->where(['id'=>$data['id']])
+                        ->update(['status'=>1]);
 
-                        //unserialize job
-                        $job = \unserialize($data['job']);
-                        $message = new Message($job, $data['id']);
-                        $message->attempts = $data['attempts'];
-                        $message->priority = $data['priority'];
+                    yield $transaction->commit();
 
-                        $this->idleCurrent = 0;
+                    //unserialize job
+                    $job = \unserialize($data['job']);
+                    $message = new Message($job, $data['id']);
+                    $message->attempts = $data['attempts'];
+                    $message->priority = $data['priority'];
 
-                        return $message;
-                    }
+                    $this->idleCurrent = 0;
+
+                    return $message;
                 }
+
+                yield $transaction->commit();
 
                 // Step increase idle time to decrease cpu/query usage
                 if ($this->idleCurrent > 0) {
@@ -207,7 +209,7 @@ class DbDriver implements Driver
                 }
 
             } catch (\Throwable $e) {
-                yield $transaction->commit();
+                yield $transaction->rollback();
             }
         });
 	}
