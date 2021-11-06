@@ -4,6 +4,7 @@ namespace Wind\Queue\Driver;
 
 use Wind\Db\Db;
 use Wind\Db\DbException;
+use Wind\Db\QueryBuilder;
 use Wind\Queue\Message;
 use Wind\Queue\Queue;
 use function Amp\call;
@@ -12,13 +13,11 @@ use function Amp\delay;
 /*
 Create the following table for queue database driver:
 
-CREATE TABLE `wind_queue_channel` (
-  `id` mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
-  `channel` char(20) NOT NULL,
-  `total` bigint(20) unsigned DEFAULT '0',
-  `last_time` int(10) unsigned DEFAULT '0',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `channel` (`channel`)
+CREATE TABLE `wind_queue_sync` (
+	`id` MEDIUMINT(8) UNSIGNED NOT NULL AUTO_INCREMENT,
+	`channel` CHAR(128) NOT NULL COLLATE 'utf8mb4_general_ci',
+	PRIMARY KEY (`id`),
+	UNIQUE INDEX `channel` (`channel`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE `wind_queue_data` (
@@ -58,24 +57,30 @@ class DbDriver implements Driver
      */
     private $db;
 
-    private $tableChannel;
+    private $tableSync;
     private $tableData;
+
+    private const STATUS_READY = 0;
+    private const STATUS_RESERVED = 1;
+    private const STATUS_FAIL = 2;
 
     public function __construct($config)
     {
         $this->channel = $config['channel'];
         $this->db = isset($config['connection']) ? Db::connection($config['connection']) : Db::connection();
-        $this->tableChannel = isset($config['table_channel']) ? $config['table_channel'] : 'queue_channel';
-        $this->tableData = isset($config['table_data']) ? $config['table_data'] : 'queue_data';
+
+        $prefix = isset($config['table_prefix']) ? $config['table_prefix'] : 'queue_';
+        $this->tableSync = $prefix.'sync';
+        $this->tableData = $prefix.'data';
     }
 
 	public function connect() {
 		return call(function() {
-		    $channel = yield $this->db->table($this->tableChannel)->where(['channel'=>$this->channel])->fetchOne();
+		    $channel = yield $this->db->table($this->tableSync)->where(['channel'=>$this->channel])->fetchOne();
 
 		    if (!$channel) {
-		        yield $this->db->table($this->tableChannel)->insertIgnore(['channel'=>$this->channel]);
-		        $channel = yield $this->db->table($this->tableChannel)->where(['channel'=>$this->channel])->fetchOne();
+		        yield $this->db->table($this->tableSync)->insertIgnore(['channel'=>$this->channel]);
+		        $channel = yield $this->db->table($this->tableSync)->where(['channel'=>$this->channel])->fetchOne();
             }
 
 		    if (!$channel) {
@@ -85,6 +90,16 @@ class DbDriver implements Driver
 		    $this->channelId = $channel['id'];
         });
 	}
+
+    /**
+     * Get Data Table QueryBuilder
+     *
+     * @return QueryBuilder
+     */
+    private function data()
+    {
+        return $this->db->table($this->tableData);
+    }
 
 	/**
 	 * @inheritDoc
@@ -100,20 +115,13 @@ class DbDriver implements Driver
                 default: $pri = $message->priority;
             }
 
-            $id = yield $this->db->table($this->tableData)->insert([
+            $id = yield $this->data()->insert([
                 'channel_id' => $this->channelId,
-                'status' => 0,
                 'job' => $data,
                 'priority' => $pri,
                 'created_at' => time(),
                 'delayed' => $delay > 0 ? time() + $delay : 0
             ]);
-
-            // Update will be block when pop..
-            // yield $this->db->table($this->tableChannel)->where(['id'=>$this->channelId])->update([
-            //     '^total' => 'total+1',
-            //     'last_time' => time()
-            // ]);
 
             return $id;
         });
@@ -131,12 +139,12 @@ class DbDriver implements Driver
 
             try {
                 //Wait for channel
-                $channel = yield $transaction->query("SELECT `id` FROM `".$this->db->prefix($this->tableChannel)."` WHERE `id`='{$this->channelId}' FOR UPDATE");
+                $channel = yield $transaction->query("SELECT `id` FROM `".$this->db->prefix($this->tableSync)."` WHERE `id`='{$this->channelId}' FOR UPDATE");
 
                 if ($channel) {
                     //get message
                     $data = yield $transaction->table($this->tableData)
-                        ->where(['channel_id'=>$this->channelId, 'status'=>0, 'delayed <'=>time()])
+                        ->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed <='=>time()])
                         ->orderBy(['priority'=>SORT_ASC])
                         ->limit(1)
                         ->fetchOne();
@@ -173,14 +181,14 @@ class DbDriver implements Driver
 	}
 
 	public function fail(Message $message) {
-		return $this->db->table($this->tableData)->where(['id'=>$message->id])->update(['status'=>2]);
+		return $this->data()->where(['id'=>$message->id])->update(['status'=>2]);
 	}
 
 	/**
 	 * @inheritDoc
 	 */
 	public function release(Message $message, $delay) {
-		return $this->db->table($this->tableData)->where(['id'=>$message->id])->update(['status'=>0, 'delayed'=>$delay > 0 ? time() + $delay : 0]);
+		return $this->data()->where(['id'=>$message->id])->update(['status'=>self::STATUS_READY, 'delayed'=>$delay > 0 ? time() + $delay : 0]);
 	}
 
 	/**
@@ -194,46 +202,109 @@ class DbDriver implements Driver
 	 * @inheritDoc
 	 */
 	public function delete($id) {
-		return $this->db->table($this->tableData)->where(['id'=>$id])->delete();
+		return $this->data()->where(['id'=>$id])->delete();
 	}
+
+    private function messageByData($data)
+    {
+        $job = \unserialize($data['job']);
+        $message = new Message($job, $data['id']);
+        $message->attempts = $data['attempts'];
+        $message->priority = $data['priority'];
+        $delayed = $data['delayed'] - time();
+        $message->delayed = $delayed > 0 ? $delayed : 0;
+        return $message;
+    }
 
 	/**
 	 * @inheritDoc
 	 */
 	public function peekFail() {
-		// TODO: Implement peekFail() method.
+		return call(function() {
+            $data = yield $this->data()->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_FAIL])->limit(1)->fetchOne();
+            return $data ? $this->messageByData($data) : null;
+        });
 	}
 
 	/**
 	 * @inheritDoc
 	 */
 	public function peekDelayed() {
-		// TODO: Implement peekDelayed() method.
+		return call(function() {
+            $data = yield $this->data()
+                ->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed >'=>time()])
+                ->orderBy(['delayed'=>SORT_ASC, 'priority'=>SORT_ASC])
+                ->limit(1)
+                ->fetchOne();
+            return $data ? $this->messageByData($data) : null;
+        });
 	}
 
 	/**
 	 * @inheritDoc
 	 */
 	public function peekReady() {
-		// TODO: Implement peekReady() method.
+		return call(function() {
+            $data = yield $this->data()
+                ->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed <='=>time()])
+                ->orderBy(['priority'=>SORT_ASC])
+                ->limit(1)
+                ->fetchOne();
+            return $data ? $this->messageByData($data) : null;
+        });
 	}
 
 	/**
 	 * @inheritDoc
 	 */
 	public function wakeup($num) {
-		// TODO: Implement wakeup() method.
+		return $this->data()->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_FAIL])->limit($num)->update(['status'=>self::STATUS_READY]);
 	}
 
 	/**
 	 * @inheritDoc
 	 */
 	public function drop($num) {
-		// TODO: Implement drop() method.
+		return $this->data()->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_FAIL])->limit($num)->delete();
 	}
 
 	public function stats() {
-		// TODO: Implement stats() method.
+        return call(function() {
+            $cc = yield $this->data()
+                ->select('status,COUNT(*) as count')
+                ->where(['channel_id'=>$this->channelId, 'status'=>[self::STATUS_FAIL, self::STATUS_RESERVED]])
+                ->groupBy('status')
+                ->indexBy('status')
+                ->fetchColumn('count');
+
+            $info = yield $this->db->fetchOne('SHOW TABLE STATUS WHERE `name`=\''.$this->db->prefix($this->tableData).'\'');
+
+            $data = [
+                'fails' => $cc[self::STATUS_FAIL] ?? 0,
+                'ready' => yield $this->data()->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed <='=>time()])->count() ?: 0,
+                'delayed' => yield $this->data()->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed >'=>time()])->count() ?: 0,
+                'reserved' => $cc[self::STATUS_RESERVED] ?? 0,
+                'total_jobs' => $info['Auto_increment'] - 1,
+                'next_id' => $info['Auto_increment']
+            ];
+
+            $type = $this->db->getType();
+            $versions = yield $this->db->indexBy('Variable_name')->fetchColumn('SHOW VARIABLES LIKE \'version%\'', [], 'Value');
+
+            $servers = ['MySQL'];
+            $server = $type;
+
+            foreach ($servers as $s) {
+                if (stripos($s, $type) !== false) {
+                    $server = $s;
+                    break;
+                }
+            }
+
+            $data['server'] = "$server {$versions['version']} {$versions['version_comment']} ({$versions['version_compile_os']} {$versions['version_compile_machine']})";
+
+            return $data;
+        });
 	}
 
 	/**
