@@ -57,8 +57,33 @@ class DbDriver implements Driver
      */
     private $db;
 
-    private $tableSync;
-    private $tableData;
+    private $tableSync = 'sync';
+    private $tableData = 'data';
+
+    /**
+     * Increase idle seconds
+     *
+     * When no message pop, the next pop loop will be delay by $idleCurrent seconds,
+     * and $idleCurrent will be continue increase when there is no message, and max by $idleMax.
+     * When there is message arrived, $idleCurrent will be reset to zero.
+     *
+     * @var float
+     */
+    private $idleIncrease = 0.5;
+
+    /**
+     * Max idle seconds when no pop message.
+     *
+     * @var float
+     */
+    private $idleMax = 5;
+
+    /**
+     * Current idle seconds
+     *
+     * @var float
+     */
+    private $idleCurrent = 0;
 
     private const STATUS_READY = 0;
     private const STATUS_RESERVED = 1;
@@ -69,9 +94,13 @@ class DbDriver implements Driver
         $this->channel = $config['channel'];
         $this->db = isset($config['connection']) ? Db::connection($config['connection']) : Db::connection();
 
-        $prefix = isset($config['table_prefix']) ? $config['table_prefix'] : 'queue_';
-        $this->tableSync = $prefix.'sync';
-        $this->tableData = $prefix.'data';
+        if (isset($config['table_prefix'])) {
+            $this->tableSync = $config['table_prefix'].$this->tableSync;
+            $this->tableData = $config['table_prefix'].$this->tableData;
+        }
+
+        isset($config['idle_increase']) && $this->idleIncrease = $config['idle_increase'];
+        isset($config['idle_max']) && $this->idleMax = $config['idle_max'];
     }
 
 	public function connect() {
@@ -161,11 +190,21 @@ class DbDriver implements Driver
                         $message->attempts = $data['attempts'];
                         $message->priority = $data['priority'];
 
+                        $this->idleCurrent = 0;
+
                         return $message;
                     }
                 }
 
-                yield delay(1000);
+                // Step increase idle time to decrease cpu/query usage
+                if ($this->idleCurrent > 0) {
+                    yield delay($this->idleCurrent * 1000);
+                }
+
+                if ($this->idleCurrent < $this->idleMax) {
+                    $nextIdle = $this->idleCurrent + $this->idleIncrease;
+                    $this->idleCurrent = $nextIdle < $this->idleMax ? $nextIdle : $this->idleMax;
+                }
 
             } catch (\Throwable $e) {
                 yield $transaction->commit();
@@ -188,7 +227,7 @@ class DbDriver implements Driver
 	 * @inheritDoc
 	 */
 	public function release(Message $message, $delay) {
-		return $this->data()->where(['id'=>$message->id])->update(['status'=>self::STATUS_READY, 'delayed'=>$delay > 0 ? time() + $delay : 0]);
+		return $this->data()->where(['id'=>$message->id])->update(['status'=>self::STATUS_READY, '^attempts'=>'attempts+1', 'delayed'=>$delay > 0 ? time() + $delay : 0]);
 	}
 
 	/**
