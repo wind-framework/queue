@@ -70,20 +70,20 @@ class ConsumerProcess extends Process
             $driver = new ChanDriver($this->config);
             $driver->connect();
             for ($i=0; $i<$concurrent; $i++) {
-                defer([$this, 'createConsumer'], $i, $driver, false);
+                defer(fn() => $this->createConsumer($i, $driver, false));
             }
             $driver->loop();
         } else {
             for ($i=0; $i<$concurrent; $i++) {
                 $driver = new $this->config['driver']($this->config);
-                defer([$this, 'createConsumer'], $i, $driver, true);
+                defer(fn() => $this->createConsumer($i, $driver, true));
             }
         }
     }
 
-    public function createConsumer($num, Driver $driver, $connectInConsumer)
+    public function createConsumer($num, Driver $driver, $connectByConsumer)
     {
-        if ($connectInConsumer) {
+        if ($connectByConsumer) {
             $driver->connect();
         }
 
