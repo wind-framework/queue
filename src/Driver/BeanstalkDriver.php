@@ -159,7 +159,19 @@ class BeanstalkDriver implements Driver
     }
 
     public function stats() {
-        return $this->client->statsTube($this->tube);
+        return call(function() {
+            $stat = yield $this->client->stats();
+            $tubeStat = yield $this->client->statsTube($this->tube);
+            return [
+                'total_jobs' => $tubeStat['total-jobs'],
+                'fails' => $tubeStat['current-jobs-buried'],
+                'ready' => $tubeStat['current-jobs-ready'],
+                'delayed' => $tubeStat['current-jobs-delayed'],
+                'reserved' => $tubeStat['current-jobs-reserved'],
+                'server' => "Beanstalkd {$stat['version']} (id: {$stat['id']}, hostname: {$stat['hostname']})",
+                'uptime' => $stat['uptime']
+            ];
+        });
     }
 
     private function peekWith($method)

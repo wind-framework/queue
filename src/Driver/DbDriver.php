@@ -325,14 +325,13 @@ class DbDriver implements Driver
                 'ready' => yield $this->data()->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed <='=>time()])->count() ?: 0,
                 'delayed' => yield $this->data()->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed >'=>time()])->count() ?: 0,
                 'reserved' => $cc[self::STATUS_RESERVED] ?? 0,
-                'total_jobs' => $info['Auto_increment'] - 1,
-                'next_id' => $info['Auto_increment']
+                'total_jobs' => $info['Auto_increment'] - 1
             ];
 
             $type = $this->db->getType();
             $versions = yield $this->db->indexBy('Variable_name')->fetchColumn('SHOW VARIABLES LIKE \'version%\'', [], 'Value');
 
-            $servers = ['MySQL'];
+            $servers = ['MySQL']; //Multi DB driver detect
             $server = $type;
 
             foreach ($servers as $s) {
@@ -343,6 +342,9 @@ class DbDriver implements Driver
             }
 
             $data['server'] = "$server {$versions['version']} {$versions['version_comment']} ({$versions['version_compile_os']} {$versions['version_compile_machine']})";
+
+            $uptime = yield $this->db->fetchOne('SHOW GLOBAL STATUS LIKE \'uptime\'');
+            $data['uptime'] = $uptime['Value'];
 
             return $data;
         });
