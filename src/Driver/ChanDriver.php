@@ -81,8 +81,6 @@ class ChanDriver implements Driver
 
     public function peekFail() { return $this->operator->peekFail(); }
 
-    public function wakeupJob($id) { return $this->operator->wakeup($id); }
-
     public function wakeup($num) { return $this->operator->wakeup($num); }
 
     public function drop($num) { return $this->operator->drop($num); }

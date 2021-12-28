@@ -330,20 +330,18 @@ class RedisDriver implements Driver
                 'ready' => 0,
                 'delayed' => yield $this->redis->zCard($this->keyDelay),
                 'reserved' => yield $this->redis->zCard($this->keyReserved),
-                'total_jobs' => 0,
-                'next_id' => yield $this->redis->get($this->keyId)
+                'total_jobs' => yield $this->redis->get($this->keyId)
             ];
 
             foreach ($this->keysReady as $key) {
                 $data['ready'] += yield $this->redis->lLen($key);
             }
 
-            $data['total_jobs'] = $data['next_id'];
-
             $info = yield $this->redis->info('server');
             preg_match_all('/(\w+):([^\r\n]+)/i', $info, $matchs);
             $infoArr = array_combine($matchs[1], $matchs[2]);
             $data['server'] = "Redis {$infoArr['redis_version']} ({$infoArr['os']})";
+            $data['uptime'] = $infoArr['uptime_in_seconds'];
 
             return $data;
         });
