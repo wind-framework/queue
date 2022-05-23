@@ -7,8 +7,6 @@ use Wind\Queue\Message;
 interface Driver
 {
 
-    public function connect();
-
     /**
      * 放入消息
      *

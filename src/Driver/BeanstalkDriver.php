@@ -42,9 +42,11 @@ class BeanstalkDriver implements Driver
         if (isset($config['reserve_timeout']) && $config['reserve_timeout'] > 0) {
             $this->reserveTimeout = $config['reserve_timeout'];
         }
+
+        $this->connect();
     }
 
-    public function connect()
+    private function connect()
     {
         $this->client->connect();
 

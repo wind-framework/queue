@@ -5,9 +5,6 @@ namespace Wind\Queue\Driver;
 use Wind\Base\Chan;
 use Wind\Queue\Message;
 
-use function Amp\async;
-use function Amp\Future\all;
-
 /**
  * A Queue Driver that only use two connection to serve unlimited consumers.
  *
@@ -41,14 +38,6 @@ class ChanDriver implements Driver
         $this->chan = new Chan();
     }
 
-    public function connect()
-    {
-        return all([
-            async(fn() => $this->popper->connect()),
-            async(fn() => $this->operator->connect())
-        ]);
-    }
-
     public function push(Message $message, int $delay)
     {
         return $this->operator->push($message, $delay);
@@ -64,7 +53,7 @@ class ChanDriver implements Driver
         defer(function() {
             while ($receiver = $this->chan->getReceiver()->await()) {
                 $data = $this->popper->pop();
-                $receiver->resolve($data);
+                $receiver->complete($data);
             }
         });
     }

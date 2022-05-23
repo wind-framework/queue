@@ -2,15 +2,16 @@
 
 namespace Wind\Queue;
 
+use Amp\TimeoutCancellation;
 use Exception;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Wind\Base\Config;
 use Wind\Process\Process;
 use Wind\Queue\Driver\ChanDriver;
 use Wind\Queue\Driver\Driver;
-use Psr\EventDispatcher\EventDispatcherInterface;
 use Wind\Process\Stateful;
 
-use function Amp\defer;
+use function Amp\async;
 
 class ConsumerProcess extends Process
 {
@@ -31,10 +32,7 @@ class ConsumerProcess extends Process
      */
     private $config;
 
-    /**
-     * @var EventDispatcherInterface
-     */
-    private $eventDispatcher;
+    private EventDispatcherInterface $eventDispatcher;
 
     /**
      * 当前工作协程状态
@@ -68,25 +66,20 @@ class ConsumerProcess extends Process
         //Use ChanDriver to optimize to connections.
         if ($concurrent > 2 && $this->config['driver']::isSupportReuseConnection()) {
             $driver = new ChanDriver($this->config);
-            $driver->connect();
             for ($i=0; $i<$concurrent; $i++) {
-                defer(fn() => $this->createConsumer($i, $driver, false));
+                defer(fn() => $this->createConsumer($i, $driver));
             }
             $driver->loop();
         } else {
             for ($i=0; $i<$concurrent; $i++) {
                 $driver = new $this->config['driver']($this->config);
-                defer(fn() => $this->createConsumer($i, $driver, true));
+                defer(fn() => $this->createConsumer($i, $driver));
             }
         }
     }
 
-    public function createConsumer($num, Driver $driver, $connectByConsumer)
+    public function createConsumer($num, Driver $driver)
     {
-        if ($connectByConsumer) {
-            $driver->connect();
-        }
-
         while (true) {
             $this->concurrentState[$num] = null;
 
@@ -105,7 +98,7 @@ class ConsumerProcess extends Process
 
             try {
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_GET, $jobClass, $message->id));
-                $job->handle();
+                async(static fn() => $job->handle())->await(new TimeoutCancellation($job->ttr));
                 $driver->ack($message);
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_SUCCEED, $jobClass, $message->id));
             } catch (\Throwable $e) {

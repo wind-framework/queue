@@ -32,7 +32,6 @@ class Queue
     public function __construct(Driver $driver)
     {
         $this->driver = $driver;
-        $driver->connect();
     }
 
 	/**

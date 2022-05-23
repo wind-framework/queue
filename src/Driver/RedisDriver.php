@@ -59,10 +59,10 @@ class RedisDriver implements Driver
         $this->uniq = StrUtil::randomString(8);
     }
 
-    public function connect()
-    {
-        return $this->redis->connect();
-    }
+    // public function connect()
+    // {
+    //     return $this->redis->connect();
+    // }
 
     public function push(Message $message, $delay)
     {
