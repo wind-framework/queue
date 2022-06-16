@@ -18,5 +18,10 @@
         "psr-4": {
             "Wind\\Queue\\": "src/"
         }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "0.1.x-dev"
+        }
     }
 }
