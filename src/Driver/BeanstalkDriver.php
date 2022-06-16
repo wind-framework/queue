@@ -69,7 +69,7 @@ class BeanstalkDriver implements Driver
             default: $pri = $message->priority;
         }
 
-        return $this->client->put($raw, $pri, $delay);
+        return $this->client->put($raw, $pri, $delay, $message->job->ttr);
     }
 
     public function pop()

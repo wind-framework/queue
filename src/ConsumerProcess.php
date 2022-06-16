@@ -4,13 +4,12 @@ namespace Wind\Queue;
 
 use Amp\Promise;
 use Exception;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Wind\Base\Config;
 use Wind\Process\Process;
+use Wind\Process\Stateful;
 use Wind\Queue\Driver\ChanDriver;
 use Wind\Queue\Driver\Driver;
-use Psr\EventDispatcher\EventDispatcherInterface;
-use Wind\Process\Stateful;
-
 use function Amp\asyncCall;
 use function Amp\call;
 
@@ -108,7 +107,7 @@ class ConsumerProcess extends Process
 
             try {
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_GET, $jobClass, $message->id));
-                yield call([$job, 'handle']);
+                yield Promise\timeout(call([$job, 'handle']), $job->ttr*1000);
                 yield $driver->ack($message);
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_SUCCEED, $jobClass, $message->id));
             } catch (\Throwable $e) {
