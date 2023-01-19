@@ -46,14 +46,16 @@ class RedisDriver implements Driver
         $this->keyData = $config['key'].':data';
         $this->keyId = $config['key'].':id';
 
-        //轮询需要有间隔主要作用于延迟队列的转移，在有多个并发时每个并发都有可能进行转移处理，理想情况下每秒都有协程处理到轮询。
-        //所以并发多时，适当的增加轮询可间隔可以减少性能浪费
-        $processes = $config['processes'] ?? 1;
-        $concurrent = $config['concurrent'] ?? 1;
-        $concurrent *= $processes;
+        if (isset($config['block_timeout'])) {
+            $this->blockTimeout = $config['block_timeout'];
+        } else {
+            //轮询需要有间隔主要作用于延迟队列的转移，在有多个并发时每个并发都有可能进行转移处理，理想情况下每秒都有协程处理到轮询。
+            //而又由于 Redis 队列支持连接复用，所以实际上一个队列在一个进程中只有一个 Popper，所以 Redis 的连接超时时间其实是跟进程数有关。
+            $processes = $config['processes'] ?? 1;
 
-        if ($concurrent < $this->blockTimeout) {
-            $this->blockTimeout = $concurrent;
+            if ($processes < $this->blockTimeout) {
+                $this->blockTimeout = $processes;
+            }
         }
     }
 
@@ -110,7 +112,7 @@ class RedisDriver implements Driver
                 return null;
             }
 
-            /* @var Job $job */
+            /** @var Job $job */
             $job = \unserialize($data);
             yield $this->redis->zAdd($this->keyReserved, time()+$job->ttr, $index);
 
