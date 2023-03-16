@@ -51,6 +51,13 @@ interface Driver
     public function delete($id);
 
     /**
+     * 重置任务超时时间以允许执行更久
+     *
+     * @param Message $message
+     */
+    public function touch(Message $message);
+
+    /**
      * 预览失败列表中的一条消息
      *
      * @return Message[]|Promise<Message[]>

@@ -2,36 +2,40 @@
 
 namespace Wind\Queue;
 
+use Wind\Base\TouchableTimeoutToken;
+use Wind\Queue\Driver\Driver;
+
+use function Amp\call;
+
 class Message
 {
 
     /**
-     * 重试次数
+     * Retried times
      * @var int
      */
     public $attempts = 0;
 
     /**
-     * 队列任务对象
+     * Job object
      * @var Job
      */
     public $job;
 
     /**
-     * 消息ID
+     * Message Id
      * @var string
      */
     public $id;
 
     /**
-     * 消息原始对象
+     * Message raw
      * @var string|null
      */
     public $raw;
 
     /**
-     * 优先级
-     *
+     * Priority
      * @var int
      */
     public $priority;
@@ -43,11 +47,44 @@ class Message
      */
     public $delayed;
 
+    /**
+     * @var TouchableTimeoutToken|null
+     */
+    private $timeoutTouchable;
+
+    /**
+     * @var Driver
+     */
+    private $driver;
+
     public function __construct(Job $job, $id=null, $raw=null)
     {
         $this->job = $job;
+        $this->job->attachMessage($this);
         $id && $this->id = $id;
         $raw && $this->raw = $raw;
+    }
+
+    public function setDriver(Driver $driver)
+    {
+        $this->driver = $driver;
+    }
+
+    public function setTouchable(TouchableTimeoutToken $timeoutTouchable)
+    {
+        $this->timeoutTouchable = $timeoutTouchable;
+    }
+
+    public function touch()
+    {
+        return call(function() {
+            if ($this->timeoutTouchable) {
+                $this->timeoutTouchable->touch();
+            }
+            if ($this->driver) {
+                yield $this->driver->touch($this);
+            }
+        });
     }
 
 }

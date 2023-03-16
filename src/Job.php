@@ -2,11 +2,16 @@
 
 namespace Wind\Queue;
 
+use function Amp\call;
+
+/**
+ * Queue Job
+ */
 abstract class Job
 {
 
     /**
-     * Default TTR
+     * Time to run (seconds)
      *
      * @var int
      */
@@ -18,6 +23,11 @@ abstract class Job
      * @var int
      */
     public $maxAttempts = 2;
+
+    /**
+     * @var Message
+     */
+    private $message;
 
     abstract public function handle();
 
@@ -48,6 +58,34 @@ abstract class Job
         }
 
         return $names;
+    }
+
+    /**
+     * Set job message
+     */
+    final public function attachMessage($message)
+    {
+        if ($this->message === null) {
+            $this->message = $message;
+        } else {
+            throw new QueueException('Message is already been set.');
+        }
+    }
+
+    /**
+     * Touch current job to re-calculate ttr time
+     *
+     * @return \Amp\Promise
+     */
+    final public function touch()
+    {
+        return call(function() {
+            if ($this->message) {
+                yield $this->message->touch();
+            } else {
+                throw new QueueException('Touch failed, message not set.');
+            }
+        });
     }
 
 }

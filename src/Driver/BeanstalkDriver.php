@@ -69,7 +69,9 @@ class BeanstalkDriver implements Driver
             default: $pri = $message->priority;
         }
 
-        return $this->client->put($raw, $pri, $delay, $message->job->ttr);
+        // more ttr (plus 2 seconds) to prevent beanstalked move it to ready
+        // leave it to framework to decide release, bury or delete
+        return $this->client->put($raw, $pri, $delay, $message->job->ttr + 2);
     }
 
     public function pop()
@@ -103,7 +105,9 @@ class BeanstalkDriver implements Driver
     {
         return call(function() use ($message, $delay) {
             $state = yield $this->client->statsJob($message->id);
-            return $this->client->release($message->id, $state['pri'], $delay);
+            if ($state['state'] == 'reserved') {
+                yield $this->client->release($message->id, $state['pri'], $delay);
+            }
         });
     }
 
@@ -111,13 +115,17 @@ class BeanstalkDriver implements Driver
     {
         return call(function() use ($message) {
             $state = yield $this->client->statsJob($message->id);
-            return $state['releases'];
+            return $state['releases'] + $state['timeouts'];
         });
     }
 
     public function delete($id)
     {
         return $this->client->delete($id);
+    }
+
+    public function touch(Message $message) {
+        return $this->client->touch($message->id);
     }
 
     public function peekDelayed() {

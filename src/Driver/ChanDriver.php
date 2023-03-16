@@ -73,6 +73,8 @@ class ChanDriver implements Driver
 
     public function delete($id) { return $this->operator->delete($id); }
 
+    public function touch(Message $message) { return $this->operator->touch($message); }
+
     public function attempts(Message $message) { return $this->operator->attempts($message); }
 
     public function peekDelayed() { return $this->operator->peekDelayed(); }

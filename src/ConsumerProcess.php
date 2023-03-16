@@ -6,6 +6,7 @@ use Amp\Promise;
 use Exception;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Wind\Base\Config;
+use Wind\Base\TouchableTimeoutToken;
 use Wind\Process\Process;
 use Wind\Process\Stateful;
 use Wind\Queue\Driver\ChanDriver;
@@ -107,9 +108,16 @@ class ConsumerProcess extends Process
 
             try {
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_GET, $jobClass, $message->id));
-                yield Promise\timeout(call([$job, 'handle']), $job->ttr*1000);
+
+                $touchable = new TouchableTimeoutToken();
+                $message->setTouchable($touchable);
+                $message->setDriver($driver);
+
+                yield touchableTimeout(call([$job, 'handle']), $job->ttr*1000, $touchable);
                 yield $driver->ack($message);
+
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_SUCCEED, $jobClass, $message->id));
+
             } catch (\Throwable $e) {
                 $attempts = $driver->attempts($message);
                 ($attempts instanceof Promise) && $attempts = yield $attempts;
@@ -136,5 +144,8 @@ class ConsumerProcess extends Process
             'stat' => $this->concurrentState
         ];
     }
+
+    public static function timoutWithTouchable()
+    {}
 
 }
