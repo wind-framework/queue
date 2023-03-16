@@ -159,7 +159,7 @@ class RedisDriver implements Driver
 
             $message->attempts++;
             $index = self::serializeIndex($message);
-            yield $this->redis->zAdd($this->keyDelay, time() + $delay, $index);
+            yield $transaction->zAdd($this->keyDelay, time() + $delay, $index);
 
             return true;
         });
