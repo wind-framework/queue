@@ -25,12 +25,13 @@ CREATE TABLE `wind_queue_data` (
   `channel_id` mediumint(8) unsigned NOT NULL,
   `status` tinyint(1) unsigned NOT NULL DEFAULT '0' COMMENT '0=ready, 1=reserved, 2=fail',
   `job` mediumtext NOT NULL,
-  `priority` tinyint(3) unsigned DEFAULT '128',
-  `attempts` tinyint(3) unsigned DEFAULT '0',
-  `created_at` int(10) unsigned DEFAULT NULL,
-  `delayed` int(10) unsigned DEFAULT '0',
+  `priority` tinyint(3) unsigned NOT NULL DEFAULT '128',
+  `attempts` tinyint(3) unsigned NOT NULL DEFAULT '0',
+  `created_at` int(10) unsigned NOT NULL,
+  `delay_to` int(10) unsigned NOT NULL DEFAULT '0',
+  `reserved_to` int(10) unsigned NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
-  KEY `channel_fetch` (`channel_id`,`status`,`delayed`)
+  KEY `channel_fetch` (`channel_id`,`status`,`delay_to`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 */
 
@@ -85,6 +86,8 @@ class DbDriver implements Driver
      */
     private $idleCurrent = 0;
 
+    private $moveReservedProbaility = 50;
+
     private const STATUS_READY = 0;
     private const STATUS_RESERVED = 1;
     private const STATUS_FAIL = 2;
@@ -101,6 +104,8 @@ class DbDriver implements Driver
 
         isset($config['idle_increase']) && $this->idleIncrease = $config['idle_increase'];
         isset($config['idle_max']) && $this->idleMax = $config['idle_max'];
+
+        $this->moveReservedProbaility = 1 / ($config['process'] ?? 1) * 100;
     }
 
 	public function connect() {
@@ -149,7 +154,7 @@ class DbDriver implements Driver
                 'job' => $data,
                 'priority' => $pri,
                 'created_at' => time(),
-                'delayed' => $delay > 0 ? time() + $delay : 0
+                'delay_to' => $delay > 0 ? time() + $delay : 0
             ]);
 
             return $id;
@@ -172,21 +177,22 @@ class DbDriver implements Driver
 
                 //get message
                 $data = yield $transaction->table($this->tableData)
-                    ->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed <='=>time()])
+                    ->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delay_to <='=>time()])
                     ->orderBy(['priority'=>SORT_ASC])
                     ->limit(1)
                     ->fetchOne();
 
                 if ($data) {
+                    /** @var \Wind\Queue\Job $job */
+                    $job = unserialize($data['job']);
+
                     //update message status
                     yield $transaction->table($this->tableData)
                         ->where(['id'=>$data['id']])
-                        ->update(['status'=>1]);
+                        ->update(['status'=>self::STATUS_RESERVED, 'reserved_to'=>time()+$job->ttr]);
 
                     yield $transaction->commit();
 
-                    //unserialize job
-                    $job = \unserialize($data['job']);
                     $message = new Message($job, $data['id']);
                     $message->attempts = $data['attempts'];
                     $message->priority = $data['priority'];
@@ -194,6 +200,13 @@ class DbDriver implements Driver
                     $this->idleCurrent = 0;
 
                     return $message;
+                }
+
+                // Move timeout job to ready state
+                if (mt_rand(0, 100) < $this->moveReservedProbaility) {
+                    yield $transaction->table($this->tableData)
+                        ->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_RESERVED, 'reserved_to <'=>time()])
+                        ->update(['status'=>self::STATUS_READY]);
                 }
 
                 yield $transaction->commit();
@@ -222,14 +235,15 @@ class DbDriver implements Driver
 	}
 
 	public function fail(Message $message) {
-		return $this->data()->where(['id'=>$message->id])->update(['status'=>2]);
+		return $this->data()->where(['id'=>$message->id, 'status'=>self::STATUS_RESERVED])->update(['status'=>self::STATUS_FAIL]);
 	}
 
 	/**
 	 * @inheritDoc
 	 */
 	public function release(Message $message, $delay) {
-		return $this->data()->where(['id'=>$message->id])->update(['status'=>self::STATUS_READY, '^attempts'=>'attempts+1', 'delayed'=>$delay > 0 ? time() + $delay : 0]);
+		return $this->data()->where(['id'=>$message->id, 'status'=>self::STATUS_RESERVED])
+            ->update(['status'=>self::STATUS_READY, '^attempts'=>'attempts+1', 'delay_to'=>$delay > 0 ? time() + $delay : 0]);
 	}
 
 	/**
@@ -246,13 +260,18 @@ class DbDriver implements Driver
 		return $this->data()->where(['id'=>$id])->delete();
 	}
 
+    public function touch(Message $message) {
+        return $this->data()->where(['id'=>$message->id, 'status'=>self::STATUS_RESERVED])
+            ->update(['reserved_to'=>time()+$message->job->ttr]);
+    }
+
     private function messageByData($data)
     {
         $job = \unserialize($data['job']);
         $message = new Message($job, $data['id']);
         $message->attempts = $data['attempts'];
         $message->priority = $data['priority'];
-        $delayed = $data['delayed'] - time();
+        $delayed = $data['delay_to'] - time();
         $message->delayed = $delayed > 0 ? $delayed : 0;
         return $message;
     }
@@ -273,8 +292,8 @@ class DbDriver implements Driver
 	public function peekDelayed() {
 		return call(function() {
             $data = yield $this->data()
-                ->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed >'=>time()])
-                ->orderBy(['delayed'=>SORT_ASC, 'priority'=>SORT_ASC])
+                ->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delay_to >'=>time()])
+                ->orderBy(['delay_to'=>SORT_ASC, 'priority'=>SORT_ASC])
                 ->limit(1)
                 ->fetchOne();
             return $data ? $this->messageByData($data) : null;
@@ -287,7 +306,7 @@ class DbDriver implements Driver
 	public function peekReady() {
 		return call(function() {
             $data = yield $this->data()
-                ->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed <='=>time()])
+                ->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delay_to <='=>time()])
                 ->orderBy(['priority'=>SORT_ASC])
                 ->limit(1)
                 ->fetchOne();
@@ -299,7 +318,9 @@ class DbDriver implements Driver
 	 * @inheritDoc
 	 */
 	public function wakeup($num) {
-		return $this->data()->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_FAIL])->limit($num)->update(['status'=>self::STATUS_READY]);
+		return $this->data()->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_FAIL])
+            ->limit($num)
+            ->update(['status'=>self::STATUS_READY]);
 	}
 
 	/**
@@ -322,8 +343,8 @@ class DbDriver implements Driver
 
             $data = [
                 'fails' => $cc[self::STATUS_FAIL] ?? 0,
-                'ready' => yield $this->data()->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed <='=>time()])->count() ?: 0,
-                'delayed' => yield $this->data()->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delayed >'=>time()])->count() ?: 0,
+                'ready' => yield $this->data()->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delay_to <='=>time()])->count() ?: 0,
+                'delayed' => yield $this->data()->where(['channel_id'=>$this->channelId, 'status'=>self::STATUS_READY, 'delay_to >'=>time()])->count() ?: 0,
                 'reserved' => $cc[self::STATUS_RESERVED] ?? 0,
                 'total_jobs' => $info['Auto_increment'] - 1
             ];
