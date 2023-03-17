@@ -116,7 +116,7 @@ class RedisDriver implements Driver
 
             /** @var Job $job */
             $job = \unserialize($data);
-            yield $this->redis->zAdd($this->keyReserved, time()+$job->ttr, $index);
+            yield $this->redis->zAdd($this->keyReserved, time() + $job->ttr + 2, $index);
 
             $message = new Message($job, $id, $index);
             $message->priority = $priority;
@@ -130,7 +130,7 @@ class RedisDriver implements Driver
     {
         return call(function() use ($message) {
             if (yield $this->redis->hDel($this->keyData, $message->id)) {
-                return yield $this->removeIndex($message);
+                return yield $this->redis->zRem($this->keyReserved, $message->raw);
             } else {
                 return false;
             }
@@ -142,7 +142,7 @@ class RedisDriver implements Driver
     {
         return call(function() use ($message) {
             if (yield $this->redis->rPush($this->keyFail, $message->raw)) {
-                return yield $this->removeIndex($message);
+                return yield $this->redis->zRem($this->keyReserved, $message->raw);
             } else {
                 return false;
             }
@@ -151,18 +151,18 @@ class RedisDriver implements Driver
 
     public function release(Message $message, $delay)
     {
-        return $this->redis->transaction(function($transaction) use ($message, $delay) {
-            /** @var \Wind\Redis\Transaction $transaction */
+        static $script = <<<LUA
+if redis.call("ZREM", KEYS[1], ARGV[1])==1 then
+    redis.call("ZADD", KEYS[2], ARGV[3], ARGV[2])
+end
+LUA;
 
-            $index = $message->raw;
-            yield $transaction->zRem($this->keyReserved, $index);
+        $oldIndex = $message->raw;
+        $message->attempts++;
+        $newIndex = self::serializeIndex($message);
+        $delayTo = time() + $delay;
 
-            $message->attempts++;
-            $index = self::serializeIndex($message);
-            yield $transaction->zAdd($this->keyDelay, time() + $delay, $index);
-
-            return true;
-        });
+        return $this->redis->eval($script, 2, $this->keyReserved, $this->keyDelay, $oldIndex, $newIndex, $delayTo);
     }
 
     public function delete($id)
@@ -172,30 +172,19 @@ class RedisDriver implements Driver
 
     public function touch(Message $message)
     {
-        return $this->redis->transaction(function($transaction) use ($message) {
-            /** @var \Wind\Redis\Transaction $transaction */
+        static $script = <<<LUA
+if redis.call("ZREM", KEYS[1], ARGV[1])==1 then
+    redis.call("ZADD", KEYS[1], ARGV[2], ARGV[1])
+end
+LUA;
+        $index = $message->raw;
+        $delayTo = time() + $message->job->ttr;
 
-            $index = $message->raw;
-            yield $transaction->zRem($this->keyReserved, $index);
-            yield $transaction->zAdd($this->keyReserved, time()+$message->job->ttr, $index);
-        });
+        return $this->redis->eval($script, 1, $this->keyReserved, $index, $delayTo);
     }
 
     public function attempts(Message $message) {
         return $message->attempts;
-    }
-
-    /**
-     * Remove index stored in reserved list.
-     *
-     * @param Message $message
-     * @return Promise<bool>
-     */
-    private function removeIndex(Message $message)
-    {
-        return call(function() use ($message) {
-            return (yield $this->redis->zRem($this->keyReserved, $message->raw)) > 0;
-        });
     }
 
     /**
@@ -205,17 +194,20 @@ class RedisDriver implements Driver
      */
     private function ready($queue)
     {
-        return call(function() use ($queue) {
+        static $script = <<<LUA
+if redis.call("ZREM", KEYS[1], ARGV[1])==1 then
+    redis.call("RPUSH", KEYS[2], ARGV[1])
+end
+LUA;
+
+        return call(function() use ($queue, $script) {
             $now = time();
             $options = ['LIMIT', 0, 256];
             if ($expires = yield $this->redis->zrevrangebyscore($queue, $now, '-inf', $options)) {
                 foreach ($expires as $index) {
-                    //Todo: fix
-                    if ((yield $this->redis->zRem($queue, $index)) > 0) {
-                        list(, $priority) = self::unserializeIndex($index);
-                        $key = $this->getPriorityKey($priority);
-                        yield $this->redis->rPush($key, $index);
-                    }
+                    list(, $priority) = self::unserializeIndex($index);
+                    $key = $this->getPriorityKey($priority);
+                    yield $this->redis->eval($script, 2, $queue, $key, $index);
                 }
             }
         });
