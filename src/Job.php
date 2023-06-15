@@ -35,7 +35,7 @@ abstract class Job
 	 * Handle before job into fail queue
 	 *
 	 * @param Message $message Message object
-	 * @param \Exception $ex The last failed exception
+	 * @param \Throwable $ex The last failed exception
 	 * @return bool True into handle queue, or false delete queue
 	 */
     public function fail($message, $ex)
