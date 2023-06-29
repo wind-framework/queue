@@ -60,8 +60,13 @@ class Message
     public function __construct(Job $job, $id=null, $raw=null)
     {
         $this->job = $job;
-        $this->job->attachMessage($this);
-        $id && $this->id = $id;
+
+        // Only attach message when pop from server
+        if ($id !== null) {
+            $this->id = $id;
+            $this->job->attachMessage($this);
+        }
+
         $raw && $this->raw = $raw;
     }
 
