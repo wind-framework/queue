@@ -113,6 +113,10 @@ class BeanstalkDriver implements Driver
         return $this->client->delete($id);
     }
 
+    public function touch(Message $message) {
+        return $this->client->touch($message->id);
+    }
+
     public function peekDelayed() {
         return $this->peekWith('peekDelayed');
     }

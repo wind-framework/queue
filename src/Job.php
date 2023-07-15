@@ -19,6 +19,11 @@ abstract class Job
      */
     public $maxAttempts = 2;
 
+    /**
+     * @var Message
+     */
+    private $message;
+
     abstract public function handle();
 
 	/**
@@ -31,6 +36,32 @@ abstract class Job
     public function fail($message, $ex)
     {
     	return true;
+    }
+
+    /**
+     * Set job message
+     */
+    final public function attachMessage($message)
+    {
+        if ($this->message === null) {
+            $this->message = $message;
+        } else {
+            throw new QueueException('Message is already been set.');
+        }
+    }
+
+    /**
+     * Touch current job to reset ttr timer
+     *
+     * @return \Amp\Promise
+     */
+    final public function touch()
+    {
+        if ($this->message) {
+            $this->message->touch();
+        } else {
+            throw new QueueException('Touch failed, message not set.');
+        }
     }
 
     /**

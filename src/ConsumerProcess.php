@@ -2,10 +2,10 @@
 
 namespace Wind\Queue;
 
-use Amp\TimeoutCancellation;
 use Exception;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Wind\Base\Config;
+use Wind\Base\TouchableTimeoutCancellation;
 use Wind\Process\Process;
 use Wind\Queue\Driver\ChanDriver;
 use Wind\Queue\Driver\Driver;
@@ -98,9 +98,16 @@ class ConsumerProcess extends Process
 
             try {
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_GET, $jobClass, $message->id));
-                async(static fn() => $job->handle())->await(new TimeoutCancellation($job->ttr));
+
+                $touchable = new TouchableTimeoutCancellation($job->ttr, "Job consume {$message->id} consume timeout.");
+                $message->setTouchable($touchable);
+                $message->setDriver($driver);
+
+                async(static fn() => $job->handle())->await($touchable);
                 $driver->ack($message);
+
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_SUCCEED, $jobClass, $message->id));
+
             } catch (\Throwable $e) {
                 $attempts = $driver->attempts($message);
 

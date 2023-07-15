@@ -109,9 +109,11 @@ class RedisDriver implements Driver
             return null;
         }
 
+        //Todo: 如果在 blpop 和 zadd 之间发生中断，那么索引就从 ready 状态中丢失，数据在 data 中变成幽灵状态
+
         /** @var Job $job */
         $job = \unserialize($data);
-        $this->redis->zAdd($this->keyReserved, time()+$job->ttr, $index);
+        $this->redis->zAdd($this->keyReserved, time() + $job->ttr + 2, $index);
 
         $message = new Message($job, $id, $index);
         $message->priority = $priority;
@@ -140,17 +142,36 @@ class RedisDriver implements Driver
 
     public function release(Message $message, $delay)
     {
-        if ($this->removeIndex($message)) {
-            ++$message->attempts;
-            $index = self::serializeIndex($message);
-            return $this->redis->zAdd($this->keyDelay, time() + $delay, $index);
-        }
-        return false;
+        static $script = <<<LUA
+if redis.call("ZREM", KEYS[1], ARGV[1])==1 then
+    redis.call("ZADD", KEYS[2], ARGV[3], ARGV[2])
+end
+LUA;
+
+        $oldIndex = $message->raw;
+        ++$message->attempts;
+        $newIndex = self::serializeIndex($message);
+        $delayTo = time() + $delay;
+
+        return $this->redis->eval($script, 2, $this->keyReserved, $this->keyDelay, $oldIndex, $newIndex, $delayTo);
     }
 
     public function delete($id)
     {
         return $this->redis->hDel($this->keyData, $id);
+    }
+
+    public function touch(Message $message)
+    {
+        static $script = <<<LUA
+if redis.call("ZREM", KEYS[1], ARGV[1])==1 then
+    redis.call("ZADD", KEYS[1], ARGV[2], ARGV[1])
+end
+LUA;
+        $index = $message->raw;
+        $delayTo = time() + $message->job->ttr;
+
+        return $this->redis->eval($script, 1, $this->keyReserved, $index, $delayTo);
     }
 
     public function attempts(Message $message) {
@@ -175,15 +196,19 @@ class RedisDriver implements Driver
      */
     private function ready($queue)
     {
+        static $script = <<<'LUA'
+if redis.call("ZREM", KEYS[1], ARGV[1])==1 then
+    redis.call("RPUSH", KEYS[2], ARGV[1])
+end
+LUA;
+
         $now = time();
         $options = ['LIMIT', 0, 256];
         if ($expires = $this->redis->zrevrangebyscore($queue, $now, '-inf', $options)) {
             foreach ($expires as $index) {
-                if (($this->redis->zRem($queue, $index)) > 0) {
-                    list(, $priority) = self::unserializeIndex($index);
-                    $key = $this->getPriorityKey($priority);
-                    $this->redis->rPush($key, $index);
-                }
+                list(, $priority) = self::unserializeIndex($index);
+                $key = $this->getPriorityKey($priority);
+                $this->redis->eval($script, 2, $queue, $key, $index);
             }
         }
     }
@@ -318,6 +343,7 @@ class RedisDriver implements Driver
         preg_match_all('/(\w+):([^\r\n]+)/i', $info, $matchs);
         $infoArr = array_combine($matchs[1], $matchs[2]);
         $data['server'] = "Redis {$infoArr['redis_version']} ({$infoArr['os']})";
+        $data['uptime'] = $infoArr['uptime_in_seconds'];
 
         return $data;
     }
@@ -327,6 +353,14 @@ class RedisDriver implements Driver
         return $this->keysReady[$pri] ?? $this->keysReady[Queue::PRI_NORMAL];
     }
 
+    /**
+     * Serialize message index for redis
+     *
+     * You need re-serialize when any of id, priority or attempts property changed.
+     *
+     * @param Message $message
+     * @return string
+     */
     private static function serializeIndex(Message $message)
     {
         return $message->id.','.$message->priority.','.$message->attempts;

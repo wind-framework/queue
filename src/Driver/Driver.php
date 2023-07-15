@@ -53,6 +53,13 @@ interface Driver
     public function delete($id);
 
     /**
+     * 重置任务超时时间以允许执行更久
+     *
+     * @param Message $message
+     */
+    public function touch(Message $message);
+
+    /**
      * 预览失败列表中的一条消息
      *
      * @return Message
@@ -89,6 +96,18 @@ interface Driver
      */
     public function drop($num);
 
+    /**
+     * Get queue statistics data
+     *
+     * @return array An array that include fields:
+     * fails: Count failed jobs in current queue,
+     * ready: Count ready jobs that wait to consume,
+     * delayed: Count delayed job that will move to ready in future,
+     * reserved: Count reserved and processing jobs,
+     * total_jobs: All jobs count,
+     * server: Server information, eg: Server name, version, OS,
+     * uptime: Queue server uptime seconds.
+     */
     public function stats();
 
     /**
