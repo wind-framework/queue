@@ -2,7 +2,7 @@
 
 namespace Wind\Queue\Driver;
 
-use Wind\Beanstalk\BeanstalkClient;
+use Wind\Beanstalk\Beanstalk;
 use Wind\Beanstalk\BeanstalkException;
 use Wind\Queue\Message;
 use Wind\Queue\Queue;
@@ -11,7 +11,7 @@ class BeanstalkDriver implements Driver
 {
 
     /**
-     * @var BeanstalkClient
+     * @var Beanstalk
      */
     private $client;
 
@@ -31,7 +31,7 @@ class BeanstalkDriver implements Driver
 
     public function __construct($config)
     {
-        $this->client = new BeanstalkClient($config['host'], $config['port'], [
+        $this->client = new Beanstalk($config['host'], $config['port'], [
             'autoReconnect' => true,
             'concurrent' => true
         ]);
@@ -62,7 +62,7 @@ class BeanstalkDriver implements Driver
         $raw = serialize($message->job);
 
         switch ($message->priority) {
-            case Queue::PRI_NORMAL: $pri = BeanstalkClient::DEFAULT_PRI; break;
+            case Queue::PRI_NORMAL: $pri = Beanstalk::DEFAULT_PRI; break;
             case Queue::PRI_HIGH: $pri = 512; break;
             case Queue::PRI_LOW: $pri = 2048; break;
             default: $pri = $message->priority;
