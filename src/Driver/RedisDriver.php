@@ -5,7 +5,7 @@ namespace Wind\Queue\Driver;
 use Wind\Queue\Job;
 use Wind\Queue\Message;
 use Wind\Queue\Queue;
-use Wind\Redis\Client as Redis;
+use Wind\Redis\Redis;
 
 class RedisDriver implements Driver
 {
