@@ -25,6 +25,13 @@ abstract class Job
     public $maxAttempts = 2;
 
     /**
+     * Attempt interval seconds
+     *
+     * @var int|array
+     */
+    public $attemptInterval = null;
+
+    /**
      * @var Message
      */
     private $message;
@@ -54,7 +61,11 @@ abstract class Job
         $names = [];
 
         foreach ($props as $p) {
-            $names[] = $p->getName();
+            $name = $p->getName();
+            if ($name == 'attemptInterval' && $this->$name === null) {
+                continue;
+            }
+            $names[] = $name;
         }
 
         return $names;

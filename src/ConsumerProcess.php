@@ -124,8 +124,15 @@ class ConsumerProcess extends Process
 
                 if ($attempts < $message->job->maxAttempts) {
                     $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_ERROR, $jobClass, $message->id, $e));
-                    $attemptDelays = [5, 30, 60, 300];
-                    $delay = $attemptDelays[$attempts] ?? end($attemptDelays);
+
+                    $interval = $message->job->attemptInterval;
+
+                    if ($interval) {
+                        $delay = is_array($interval) ? ($interval[$attempts] ?? end($interval)) : $interval;
+                    } else {
+                        $delay = ($attempts + 1) * 5;
+                    }
+
                     yield $driver->release($message, $delay);
                 } else {
                     $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_FAILED, $jobClass, $message->id, $e));
