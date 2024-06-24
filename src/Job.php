@@ -13,11 +13,18 @@ abstract class Job
     public $ttr = 60;
 
     /**
-     * Max attempts to consume job
+     * Max number of retries to consume job
      *
      * @var int
      */
-    public $maxAttempts = 2;
+    public $maxRetries  = 2;
+
+    /**
+     * Attempt interval seconds
+     *
+     * @var int|array
+     */
+    public $retryInterval = null;
 
     /**
      * @var Message
@@ -36,6 +43,25 @@ abstract class Job
     public function fail($message, $ex)
     {
     	return true;
+    }
+
+    /**
+     * Retry seconds
+     *
+     * @param int $attempts Current attempt times, start from zero.
+     * @return int Current attempt delay seconds
+     */
+    public function retrySeconds($attempts)
+    {
+        if (isset($this->retryInterval)) {
+            if (is_array($this->retryInterval)) {
+                return $this->retryInterval[$attempts] ?? end($this->retryInterval);
+            } else {
+                return $this->retryInterval;
+            }
+        } else {
+            return ($attempts + 1) * 5;
+        }
     }
 
     /**
@@ -75,7 +101,12 @@ abstract class Job
         $names = [];
 
         foreach ($props as $p) {
-            $names[] = $p->getName();
+            $name = $p->getName();
+            //don't serialize retryInterval if its not set
+            if ($name == 'retryInterval' && $this->$name === null) {
+                continue;
+            }
+            $names[] = $name;
         }
 
         return $names;
