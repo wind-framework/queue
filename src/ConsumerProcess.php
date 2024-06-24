@@ -112,16 +112,20 @@ class ConsumerProcess extends Process
                 $attempts = $driver->attempts($message);
 
                 if ($attempts < $message->job->maxRetries) {
-                    $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_ERROR, $jobClass, $message->id, $e));
-                    $delay = $message->job->retrySeconds($attempts);
-                    $driver->release($message, $delay);
-                } else {
-                    $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_FAILED, $jobClass, $message->id, $e));
-                    if ($job->fail($message, $e)) {
-                        $driver->fail($message);
-                    } else {
-                        $driver->delete($message->id);
+                    $delay = $message->job->retryPolicy($attempts, $e);
+                    if ($delay !== false) {
+                        $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_ERROR, $jobClass, $message->id, $e));
+                        $driver->release($message, $delay);
+                        continue;
                     }
+                }
+
+                $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_FAILED, $jobClass, $message->id, $e));
+
+                if ($job->fail($message, $e)) {
+                    $driver->fail($message);
+                } else {
+                    $driver->delete($message->id);
                 }
             }
         }

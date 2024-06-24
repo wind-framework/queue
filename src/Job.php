@@ -46,12 +46,13 @@ abstract class Job
     }
 
     /**
-     * Retry seconds
+     * Decide how to retry
      *
      * @param int $attempts Current attempt times, start from zero.
-     * @return int Current attempt delay seconds
+     * @param \Throwable $ex The exception that trigger retry
+     * @return int|false Integer is number of retry seconds, or false means don't retry
      */
-    public function retrySeconds($attempts)
+    public function retryPolicy($attempts, $ex)
     {
         if (isset($this->retryInterval)) {
             if (is_array($this->retryInterval)) {
