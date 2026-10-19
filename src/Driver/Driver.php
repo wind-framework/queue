@@ -37,7 +37,10 @@ interface Driver
     public function release(Message $message, $delay);
 
     /**
-     * 获取消息的已尝试次数
+     * Number of the job attempted, excluding the current execution.
+     *
+     * Equals to the number of retries: the final failed attempt is never
+     * counted, so a job in the fail queue has run attempts + 1 times in total.
      *
      * @param Message $message
      * @return int

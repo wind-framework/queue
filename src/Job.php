@@ -20,9 +20,9 @@ abstract class Job
     public $maxRetries  = 2;
 
     /**
-     * Attempt interval seconds
+     * Retry interval seconds
      *
-     * @var int|array
+     * @var int|array|null
      */
     public $retryInterval = null;
 
@@ -48,7 +48,7 @@ abstract class Job
     /**
      * Decide how to retry
      *
-     * @param int $attempts Current attempt times, start from zero.
+     * @param int $attempts Number of the job attempted, excluding the current execution.
      * @param \Throwable $ex The exception that trigger retry
      * @return int|false Integer is number of retry seconds, or false means don't retry
      */

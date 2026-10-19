@@ -109,6 +109,7 @@ class ConsumerProcess extends Process
                 $this->eventDispatcher->dispatch(new QueueJobEvent(QueueJobEvent::STATE_SUCCEED, $jobClass, $message->id));
 
             } catch (\Throwable $e) {
+                //Number of the job attempted (not included this time)
                 $attempts = $driver->attempts($message);
 
                 if ($attempts < $message->job->maxRetries) {
